@@ -256,14 +256,15 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
   return (
     <>
-      {/* FAB Trigger - Perfect Circle, Compact, Responsive Positioning */}
+      {/* FAB Trigger - Updated sizing and positioning for better visibility across devices */}
       <button 
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-24 right-4 sm:bottom-8 sm:right-8 z-40 w-12 h-12 sm:w-14 sm:h-14 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-2xl transition-all hover:scale-110 active:scale-95 flex items-center justify-center border-2 border-slate-50 dark:border-slate-900 relative"
+        className="fixed bottom-28 right-5 sm:bottom-10 sm:right-10 z-[60] w-14 h-14 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-2xl shadow-brand-500/40 transition-transform hover:scale-105 active:scale-95 flex items-center justify-center border-[3px] border-slate-50 dark:border-slate-900 relative"
+        aria-label="Open Social Hub"
       >
-        <Users size={22} className="sm:w-6 sm:h-6" />
+        <Users size={26} strokeWidth={2.5} />
         {getTotalUnreadCount() > 0 && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center text-[10px] font-bold animate-pulse">
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center text-[10px] font-bold animate-pulse shadow-sm">
             {getTotalUnreadCount() > 9 ? '9+' : getTotalUnreadCount()}
           </span>
         )}
@@ -271,7 +272,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
       {/* Drawer Overlay */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end sm:p-6 bg-black/40 backdrop-blur-sm animate-in fade-in">
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-end sm:p-6 bg-black/40 backdrop-blur-sm animate-in fade-in">
           
           <div className="bg-white dark:bg-[#0A0A0F] w-full sm:w-[400px] h-[80dvh] max-h-[800px] sm:h-[600px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-white/10 animate-in slide-in-from-bottom-10 sm:slide-in-from-right-10 duration-300 relative">
             
