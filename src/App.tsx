@@ -72,6 +72,7 @@ export default function App() {
     error,
     friends,
     incomingFriendRequest, 
+    incomingReaction,
     sendMessage, 
     sendImage, 
     sendAudio,
@@ -311,26 +312,27 @@ export default function App() {
 
   // --- VIEW RENDERING LOGIC ---
   const renderMainContent = () => {
-    // 1. Landing Page (Only if IDLE and no profile)
-    if (status === ChatMode.IDLE && !userProfile) {
-      return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
-    }
-
-    // 2. Direct Chat Mode - Show a nice static wallpaper/background instead of Landing Page
+    // 1. Direct Session (Social Hub Active)
+    // We render a simple background to indicate "Home" state without distracting UI
     if (sessionType === 'direct') {
        return (
-         <div className="h-full w-full flex items-center justify-center bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
-            {/* Simple Background Pattern */}
-            <div className="absolute inset-0 opacity-5 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
-            <div className="text-center p-6 opacity-40">
-               <div className="w-20 h-20 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mb-4 flex items-center justify-center text-slate-400">
-                  <UserPlus size={40} />
+         <div className="h-full w-full flex items-center justify-center relative overflow-hidden">
+            {/* Neutral Background/Wallpaper */}
+            <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+            <div className="text-center p-8 opacity-40">
+               <div className="w-24 h-24 bg-slate-200 dark:bg-white/5 rounded-full mx-auto mb-4 flex items-center justify-center">
+                  <Shield size={40} />
                </div>
-               <h2 className="text-xl font-bold text-slate-900 dark:text-white">Social Hub Active</h2>
-               <p className="text-slate-500">You are chatting in the hub.</p>
+               <h3 className="text-xl font-bold mb-2">Social Hub Active</h3>
+               <p className="text-sm">Chatting with friends...</p>
             </div>
          </div>
        );
+    }
+
+    // 2. Landing Page (Only if IDLE and no profile)
+    if (status === ChatMode.IDLE && !userProfile) {
+      return <LandingPage onlineCount={onlineUsers.length} onStart={handleStartClick} />;
     }
 
     // 3. Waiting / Connecting Screen (Random Mode)
@@ -552,6 +554,7 @@ export default function App() {
           error={error}
           onEditMessage={initiateEdit}
           sessionType={sessionType}
+          incomingReaction={incomingReaction}
         />
       )}
     </div>

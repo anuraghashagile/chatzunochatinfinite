@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { ArrowRight, Ghost, Shield, Check, AlertCircle, FileText, X } from 'lucide-react';
 import { Button } from './Button';

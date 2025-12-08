@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle, Loader2, UserPlus, Heart } from 'lucide-react';
 import { UserProfile, PresenceState, RecentPeer, Message, ChatMode, SessionType, Friend } from '../types';
@@ -20,6 +19,7 @@ interface SocialHubProps {
   error?: string | null;
   onEditMessage?: (id: string, text: string) => void;
   sessionType: SessionType;
+  incomingReaction?: { messageId: string, emoji: string, sender: 'stranger' } | null;
 }
 
 export const SocialHub: React.FC<SocialHubProps> = ({ 
@@ -36,7 +36,8 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   chatStatus,
   error,
   onEditMessage,
-  sessionType
+  sessionType,
+  incomingReaction
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global' | 'friends'>('online');
@@ -91,17 +92,56 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   // --- 3. SYNC REAL-TIME MESSAGES TO LOCAL HISTORY ---
   useEffect(() => {
     if (activePeer && privateMessages.length > 0) {
-      const lastMsg = privateMessages[privateMessages.length - 1];
-      
       setLocalChatHistory(prev => {
-        if (prev.some(m => m.id === lastMsg.id)) return prev;
-        
-        const newHistory = [...prev, lastMsg];
-        localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(newHistory));
-        return newHistory;
+        const newHistory = [...prev];
+        let hasChanges = false;
+
+        privateMessages.forEach(msg => {
+          const index = newHistory.findIndex(m => m.id === msg.id);
+          if (index === -1) {
+            newHistory.push(msg);
+            hasChanges = true;
+          } else {
+            // Check for updates (reactions/edits) using stringify for deep compare
+            if (JSON.stringify(newHistory[index]) !== JSON.stringify(msg)) {
+               newHistory[index] = msg;
+               hasChanges = true;
+            }
+          }
+        });
+
+        if (hasChanges) {
+          localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(newHistory));
+          return newHistory;
+        }
+        return prev;
       });
     }
   }, [privateMessages, activePeer]);
+
+  // --- 4. SYNC INCOMING REACTIONS TO HISTORICAL MESSAGES ---
+  useEffect(() => {
+    if (incomingReaction && activePeer) {
+      setLocalChatHistory(prev => {
+        const updatedHistory = prev.map(msg => {
+           if (msg.id === incomingReaction.messageId) {
+             // Prevent duplicates
+             const hasReaction = msg.reactions?.some(r => r.emoji === incomingReaction.emoji && r.sender === 'stranger');
+             if (hasReaction) return msg;
+
+             return {
+               ...msg,
+               reactions: [...(msg.reactions || []), { emoji: incomingReaction.emoji, sender: 'stranger' as const }]
+             };
+           }
+           return msg;
+        });
+        localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(updatedHistory));
+        return updatedHistory;
+      });
+    }
+  }, [incomingReaction, activePeer]);
+
 
   // --- SCROLLING ---
   useEffect(() => {
@@ -139,7 +179,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
         reactions: []
       };
 
-      // 2. Update Local State & Storage
+      // 2. Update Local State & Storage immediately
       const updatedHistory = [...localChatHistory, newMsg];
       setLocalChatHistory(updatedHistory);
       localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(updatedHistory));
@@ -149,6 +189,27 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
       setPrivateInput('');
     }
+  };
+
+  const handleReactionSend = (messageId: string, emoji: string) => {
+    // Optimistic update for sender side in local history
+    if (activePeer) {
+      setLocalChatHistory(prev => {
+         const updated = prev.map(msg => {
+           if (msg.id === messageId) {
+             return {
+               ...msg,
+               reactions: [...(msg.reactions || []), { emoji, sender: 'me' as const }]
+             };
+           }
+           return msg;
+         });
+         localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(updated));
+         return updated;
+      });
+    }
+    // Network send
+    if (sendReaction) sendReaction(messageId, emoji);
   };
 
   const openPrivateChat = (peerId: string, profile?: UserProfile) => {
@@ -173,7 +234,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
         className="fixed bottom-36 right-4 sm:bottom-6 sm:right-6 z-40 bg-brand-500 hover:bg-brand-600 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-4 border-slate-50 dark:border-slate-900"
       >
         <MessageCircle size={28} />
-        {/* Simple unread indicator could go here if implemented */}
       </button>
 
       {/* Drawer Overlay */}
@@ -399,7 +459,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                           key={msg.id}
                           message={msg}
                           senderName={activePeer.profile.username}
-                          onReact={sendReaction ? (emoji) => sendReaction(msg.id, emoji) : undefined}
+                          onReact={(emoji) => handleReactionSend(msg.id, emoji)}
                           onEdit={onEditMessage}
                        />
                      ))}

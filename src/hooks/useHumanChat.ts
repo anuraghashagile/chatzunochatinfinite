@@ -24,6 +24,9 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
+  // Expose raw reaction event for external handling (e.g., updating historical messages in SocialHub)
+  const [incomingReaction, setIncomingReaction] = useState<{ messageId: string, emoji: string, sender: 'stranger' } | null>(null);
+  
   // Friend System State
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incomingFriendRequest, setIncomingFriendRequest] = useState<FriendRequest | null>(null);
@@ -127,6 +130,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     isMatchmakerRef.current = false;
     setPartnerTyping(false);
     setPartnerRecording(false);
+    setIncomingReaction(null);
     
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
@@ -300,6 +304,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       setMessages(prev => [...prev, newMessage]);
 
     } else if (data.type === 'reaction') {
+       // Update hook state (if message is in current session)
        setMessages(prev => {
          const newMessages = prev.map(msg => {
            if (msg.id === data.messageId) {
@@ -312,6 +317,14 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
          });
          return newMessages;
        });
+
+       // Trigger event for persistent storage (even if message is old)
+       if (data.messageId) {
+         setIncomingReaction({ messageId: data.messageId, emoji: data.payload, sender: 'stranger' });
+         // Clear it shortly after to allow re-triggering for same reaction if needed? 
+         // Actually React state updates will handle distinct objects.
+         setTimeout(() => setIncomingReaction(null), 100); 
+       }
 
     } else if (data.type === 'edit_message') {
        setMessages(prev => prev.map(msg => {
@@ -338,6 +351,14 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       if (connRef.current?.peer) {
         saveToRecent(data.payload, connRef.current.peer);
       }
+      // Update the initial system message if it exists
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === 'init-1') {
+          return { ...msg, text: `Connected with ${data.payload.username}. Say hello!` };
+        }
+        return msg;
+      }));
+
     } else if (data.type === 'profile_update') {
       setPartnerProfile(data.payload);
       if (connRef.current?.peer) {
@@ -561,6 +582,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     error,
     friends,
     incomingFriendRequest,
+    incomingReaction,
     sendMessage, 
     sendImage,
     sendAudio,

@@ -27,9 +27,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   if (message.sender === 'system') {
     return (
       <div className="flex flex-col items-center gap-1 my-6 opacity-75">
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-          {message.sender.toUpperCase()}
-        </span>
         <span className="text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/50 px-3 py-1 rounded-full text-center max-w-[80%]">
           {message.text}
         </span>
