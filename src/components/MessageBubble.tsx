@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Message } from '../types';
 import { clsx } from 'clsx';
@@ -25,17 +23,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [showPicker, setShowPicker] = useState(false);
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
-
-  // Close picker when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (bubbleRef.current && !bubbleRef.current.contains(event.target as Node)) {
-        setShowPicker(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   if (message.sender === 'system') {
     return (
@@ -111,31 +98,33 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   return (
     <div className={clsx("flex w-full mb-6 group relative", isMe ? "justify-end" : "justify-start", entryAnimation)}>
       
-      {/* Reaction Picker Popover */}
+      {/* Fixed Overlay Reaction Picker - Ensures visibility on all devices */}
       {showPicker && (
-        <div className={clsx(
-          "absolute bottom-full mb-2 z-50 bg-white dark:bg-[#1a1b26] p-2 rounded-full shadow-xl border border-slate-200 dark:border-white/10 flex gap-1 animate-in zoom-in-95 duration-200",
-          isMe ? "right-0" : "left-0"
-        )}>
-           {PRESET_REACTIONS.map(emoji => (
-             <button
-               key={emoji}
-               onClick={() => handleReactionSelect(emoji)}
-               className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-lg transition-transform hover:scale-125"
-             >
-               {emoji}
-             </button>
-           ))}
-           {/* Edit Option in Picker for Mobile */}
-           {isMe && message.type === 'text' && onEdit && (
-              <button
-                onClick={(e) => { handleEditClick(e); setShowPicker(false); }}
-                className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-slate-500"
-              >
-                <Pencil size={14} />
-              </button>
-           )}
-        </div>
+        <>
+          <div 
+            className="fixed inset-0 z-[90] bg-black/5" 
+            onClick={() => setShowPicker(false)}
+          />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] bg-white dark:bg-[#1a1b26] p-4 rounded-3xl shadow-2xl border border-slate-200 dark:border-white/10 flex gap-3 animate-in zoom-in-95 duration-200">
+             {PRESET_REACTIONS.map(emoji => (
+               <button
+                 key={emoji}
+                 onClick={() => handleReactionSelect(emoji)}
+                 className="w-10 h-10 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-2xl transition-transform hover:scale-125"
+               >
+                 {emoji}
+               </button>
+             ))}
+             {isMe && message.type === 'text' && onEdit && (
+                <button
+                  onClick={(e) => { handleEditClick(e); setShowPicker(false); }}
+                  className="w-10 h-10 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-slate-500 border-l border-slate-200 dark:border-white/10 pl-4 ml-2"
+                >
+                  <Pencil size={18} />
+                </button>
+             )}
+          </div>
+        </>
       )}
 
       <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", isMe ? "items-end" : "items-start")}>

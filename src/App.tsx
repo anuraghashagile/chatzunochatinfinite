@@ -312,26 +312,9 @@ export default function App() {
       return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
     }
 
-    // 2. Direct Chat Mode (Main screen should show lobby background, NOT the chat)
+    // 2. Direct Chat Mode - SHOW IDLE BACKGROUND (Landing Page)
     if (sessionType === 'direct') {
-      return (
-        <div className="h-full flex flex-col items-center justify-center p-6 text-center">
-             <div className="bg-white/5 p-8 rounded-3xl backdrop-blur-sm border border-white/10 max-w-md w-full animate-in fade-in zoom-in-95">
-                <div className="w-16 h-16 bg-brand-500/20 text-brand-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <RefreshCw size={32} className="animate-spin-slow" />
-                </div>
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Social Hub Active</h2>
-                <p className="text-slate-500 dark:text-slate-400">
-                  You are currently chatting in the Social Hub. 
-                </p>
-                <div className="mt-6 flex justify-center">
-                   <Button variant="secondary" onClick={handleNewChat}>
-                      Start Random Chat
-                   </Button>
-                </div>
-             </div>
-        </div>
-      );
+       return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
     }
 
     // 3. Waiting / Connecting Screen (Random Mode)
@@ -339,7 +322,6 @@ export default function App() {
       return (
         <div className="h-full flex flex-col items-center justify-center p-6 text-center">
           <div className="relative mb-8">
-            {/* New Infinity Loader */}
             <Loader />
           </div>
           <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-3">Matching you...</h2>
@@ -445,7 +427,7 @@ export default function App() {
         <div className="absolute inset-0 pointer-events-none z-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
       )}
 
-      {/* Header - Always Visible if not IDLE */}
+      {/* Header - Always Visible if not IDLE (and not direct) */}
       {(status !== ChatMode.IDLE || userProfile) && (
         <Header 
           onlineCount={onlineUsers.length} 
@@ -453,7 +435,7 @@ export default function App() {
           theme={theme}
           toggleTheme={toggleTheme}
           onDisconnect={() => disconnect()}
-          partnerProfile={sessionType === 'random' ? partnerProfile : null} // Hide partner profile in header if Direct Mode (it shows in hub)
+          partnerProfile={sessionType === 'random' ? partnerProfile : null} 
           onOpenSettings={() => setShowSettingsModal(true)}
           onEditProfile={() => setShowEditProfileModal(true)}
         />
@@ -469,7 +451,7 @@ export default function App() {
       )}
 
       {/* Vanish Mode Badge */}
-      {settings.vanishMode && status === ChatMode.CONNECTED && (
+      {settings.vanishMode && status === ChatMode.CONNECTED && sessionType === 'random' && (
          <div className="absolute top-16 left-0 right-0 z-40 flex justify-center pointer-events-none animate-in slide-in-from-top-4">
             <div className="bg-purple-500/10 backdrop-blur-md border border-purple-500/20 px-4 py-1.5 rounded-b-xl text-[10px] font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-purple-900/20">
                <EyeOff size={12} />
@@ -502,11 +484,11 @@ export default function App() {
         onSave={saveEditedMessage}
       />
 
-      {/* Social Hub - PERSISTENT COMPONENT (Outside conditional returns) */}
+      {/* Social Hub - PERSISTENT COMPONENT */}
       {userProfile && (
         <SocialHub 
           onlineUsers={onlineUsers} 
-          onCallPeer={handleDirectCall} // Use wrapper that sets sessionType
+          onCallPeer={handleDirectCall} 
           globalMessages={globalMessages}
           sendGlobalMessage={sendGlobalMessage}
           myProfile={userProfile}
