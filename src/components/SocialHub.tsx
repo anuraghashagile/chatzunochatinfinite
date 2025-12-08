@@ -259,9 +259,9 @@ export const SocialHub: React.FC<SocialHubProps> = ({
       {/* FAB Trigger */}
       <button 
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-36 right-4 sm:bottom-6 sm:right-6 z-40 bg-brand-500 hover:bg-brand-600 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-4 border-slate-50 dark:border-slate-900 relative"
+        className="fixed bottom-28 right-4 sm:bottom-6 sm:right-6 z-40 bg-brand-500 hover:bg-brand-600 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-[3px] border-slate-50 dark:border-slate-900 relative"
       >
-        <MessageCircle size={28} />
+        <Users size={28} />
         {getTotalUnreadCount() > 0 && (
           <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center text-[10px] font-bold animate-pulse">
             {getTotalUnreadCount() > 9 ? '9+' : getTotalUnreadCount()}
