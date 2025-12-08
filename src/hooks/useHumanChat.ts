@@ -28,7 +28,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const [error, setError] = useState<string | null>(null);
   
   // --- DIRECT CHAT STATE (Social Hub) ---
-  // We expose a generic event for direct messages so the UI (SocialHub) can listen and update specific histories
   const [incomingDirectMessage, setIncomingDirectMessage] = useState<DirectMessageEvent | null>(null);
   const [incomingReaction, setIncomingReaction] = useState<{ messageId: string, emoji: string, sender: 'stranger' } | null>(null);
   
@@ -46,6 +45,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const myPeerIdRef = useRef<string | null>(null);
   const isMatchmakerRef = useRef(false);
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,6 +130,11 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       mainConnRef.current = null;
     }
 
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
+
     // We do NOT destroy peerRef here, as direct chats might rely on it.
     
     isMatchmakerRef.current = false;
@@ -174,11 +179,9 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
     // 2. REACTIONS
     } else if (data.type === 'reaction') {
-       // Logic for updating historical/local messages is shared
        if (data.messageId) {
          setIncomingReaction({ messageId: data.messageId, emoji: data.payload, sender: 'stranger' });
          
-         // If it's the main chat, update visual state too
          if (isMain) {
             setMessages(prev => prev.map(msg => {
                if (msg.id === data.messageId) {
@@ -186,12 +189,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
                }
                return msg;
             }));
-         }
-         
-         // Trigger event for direct message listener to update local storage history
-         if (!isMain) {
-           // We might need a mechanism to tell SocialHub "update history for peer X"
-           // Using incomingDirectMessage or incomingReaction (which is global) works if ID is unique enough
          }
        }
 
@@ -205,9 +202,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
            return msg;
          }));
        }
-       // Note: Direct message editing sync not fully implemented for history yet, but reaction is priority
 
-    // 4. INDICATORS (Main Only typically)
+    // 4. INDICATORS (Main Only)
     } else if (data.type === 'typing' && isMain) {
       setPartnerTyping(data.payload);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -228,7 +224,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
           return msg;
         }));
       } else {
-        // Profile for direct chat - save to recent immediately
         saveToRecent(data.payload, conn.peer);
       }
 
@@ -251,7 +246,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         mainConnRef.current?.close();
         mainConnRef.current = null;
       } else {
-        // Clean up direct connection
         directConnsRef.current.delete(conn.peer);
       }
     }
@@ -259,11 +253,17 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
   // --- CONNECTION SETUP ---
   const setupConnection = useCallback((conn: DataConnection, metadata: ConnectionMetadata) => {
-    // If Random Chat (Main)
+    // Clear timeout if this was a result of matchmaking
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
+
     if (metadata?.type === 'random' || (!metadata && isMatchmakerRef.current)) {
        mainConnRef.current = conn;
+       // Stop being matchmaker since we are connected/connecting
+       isMatchmakerRef.current = false;
        
-       // Update lobby presence to Busy
        if (channelRef.current && myPeerIdRef.current) {
           channelRef.current.track({
              peerId: myPeerIdRef.current,
@@ -273,7 +273,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
           });
        }
     } else {
-       // Direct Chat (Social Hub)
        directConnsRef.current.set(conn.peer, conn);
     }
     
@@ -283,7 +282,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         setMessages([INITIAL_GREETING]);
         setError(null);
       }
-      // Send profile to establish identity
       if (userProfile) {
         conn.send({ type: 'profile', payload: userProfile });
       }
@@ -304,6 +302,10 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       console.error("Connection Error:", err);
       if (conn === mainConnRef.current) {
          setError("Connection lost.");
+         // If error happens during initial connection, reset matchmaker status
+         if (status === ChatMode.SEARCHING || status === ChatMode.WAITING) {
+           isMatchmakerRef.current = false;
+         }
       }
     });
   }, [handleIncomingData, status, userProfile]);
@@ -322,9 +324,20 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     });
 
     (peer as any).on('connection', (conn: DataConnection) => {
-      // Incoming connection
       const metadata = conn.metadata as ConnectionMetadata;
       setupConnection(conn, metadata);
+    });
+
+    // Global peer error handler for matchmaking issues
+    (peer as any).on('error', (err: any) => {
+      console.error("Peer Error:", err);
+      if (err.type === 'peer-unavailable') {
+         // This is critical for fixing "stuck loading"
+         if (isMatchmakerRef.current) {
+           isMatchmakerRef.current = false;
+           // Retrying logic would happen via presence sync automatically if we reset the flag
+         }
+      }
     });
 
     return peer;
@@ -333,7 +346,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
   // --- CONNECT (RANDOM) ---
   const connect = useCallback(() => {
-    // Clean up ONLY main connection items
     cleanupMain();
     setMessages([]);
     setPartnerProfile(null);
@@ -349,10 +361,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
        peer.on('open', (id) => joinLobby(id));
     }
 
-  }, [cleanupMain, initPeer]); // joinLobby is defined below but hoisted via closure in real usage, wait we need to define joinLobby first or use refs.
-
-  // Re-ordering joinLobby definition to be before usage or use `useCallback` dependency flow.
-  // Actually, let's define joinLobby inside the hook scope.
+  }, [cleanupMain, initPeer]); // joinLobby defined below
 
   const joinLobby = useCallback((myId: string) => {
     setStatus(ChatMode.SEARCHING);
@@ -369,24 +378,46 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         const allUsers = Object.values(newState).flat() as unknown as PresenceState[];
         setOnlineUsers(allUsers);
 
-        // Only matchmaking if we are NOT already connected in main chat
+        // Don't match if already connected or acting as matchmaker
         if (isMatchmakerRef.current || mainConnRef.current?.open) return;
 
+        // Find available users (excluding self)
         const sortedWaiters = allUsers
           .filter(u => u.status === 'waiting')
           .sort((a, b) => a.timestamp - b.timestamp);
 
         const oldestWaiter = sortedWaiters[0];
 
+        // Match Logic
         if (oldestWaiter && oldestWaiter.peerId !== myId) {
            console.log("Found partner. Connecting:", oldestWaiter.peerId);
            isMatchmakerRef.current = true;
-           const conn = peerRef.current?.connect(oldestWaiter.peerId, { 
-             reliable: true,
-             metadata: { type: 'random' } 
-           });
-           if (conn) {
-             setupConnection(conn, { type: 'random' });
+           
+           try {
+             const conn = peerRef.current?.connect(oldestWaiter.peerId, { 
+               reliable: true,
+               metadata: { type: 'random' } 
+             });
+             
+             if (conn) {
+               setupConnection(conn, { type: 'random' });
+               
+               // Set a safety timeout. If connection doesn't open in 5s, reset.
+               if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+               connectionTimeoutRef.current = setTimeout(() => {
+                 if (isMatchmakerRef.current && (!mainConnRef.current || !mainConnRef.current.open)) {
+                   console.warn("Connection timed out. Resetting matchmaker.");
+                   isMatchmakerRef.current = false;
+                   mainConnRef.current = null;
+                   // Trigger a presence update to retry matching (optional/implicit)
+                 }
+               }, 5000);
+             } else {
+               isMatchmakerRef.current = false;
+             }
+           } catch (e) {
+             console.error("Matchmaking connection failed", e);
+             isMatchmakerRef.current = false;
            }
         }
       })
@@ -451,7 +482,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [status]);
 
   const sendReaction = useCallback((messageId: string, emoji: string) => {
-    // Update main chat messages
     setMessages(prev => prev.map(msg => {
       if (msg.id === messageId) {
         return { ...msg, reactions: [...(msg.reactions || []), { emoji, sender: 'me' }] };
@@ -477,12 +507,9 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
   // --- SEND DIRECT MESSAGE (SOCIAL HUB) ---
   const sendDirectMessage = useCallback((targetPeerId: string, text: string) => {
-    // 1. Check if we already have a connection
     let conn = directConnsRef.current.get(targetPeerId);
 
-    // 2. If not, try to connect immediately
     if (!conn && peerRef.current) {
-      console.log(`Creating new direct connection to ${targetPeerId}`);
       try {
         conn = peerRef.current.connect(targetPeerId, { 
           reliable: true,
@@ -490,10 +517,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         });
         if (conn) {
           setupConnection(conn, { type: 'direct' });
-          // Note: Connection takes a moment to open. PeerJS queues data if strict mode is off, 
-          // or we might need to wait for 'open' event.
-          // For simplicity in this React hook, we'll try sending. 
-          // PeerJS buffers automatically if connection is not yet open.
         }
       } catch (e) {
         console.error("Failed to connect direct", e);
@@ -502,26 +525,19 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
     if (conn) {
       const payload: PeerData = { type: 'message', payload: text, dataType: 'text' };
+      // Even if connection is not 'open' yet, peerjs buffers it
       conn.send(payload);
     }
-    
-    // Note: Local storage update for direct messages happens in the UI component (SocialHub)
-    // to keep this hook focused on transport.
   }, [setupConnection]);
 
   // --- CALL PEER (Direct) ---
   const callPeer = useCallback((targetPeerId: string, targetProfile?: UserProfile) => {
-    // This function initializes a direct connection without disrupting main chat
-    
-    // Ensure peer is ready
     const peer = initPeer();
     
-    // Save to recent immediately
     if (targetProfile) {
       saveToRecent(targetProfile, targetPeerId);
     }
 
-    // Connect if not exists
     if (!directConnsRef.current.has(targetPeerId)) {
       const conn = peer.connect(targetPeerId, { 
         reliable: true, 
@@ -547,11 +563,9 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [status]);
 
   const updateMyProfile = useCallback((newProfile: UserProfile) => {
-    // Update main
     if (mainConnRef.current && status === ChatMode.CONNECTED) {
       mainConnRef.current.send({ type: 'profile_update', payload: newProfile });
     }
-    // Update all direct peers
     directConnsRef.current.forEach(conn => {
       conn.send({ type: 'profile_update', payload: newProfile });
     });
@@ -573,18 +587,15 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [status]);
 
   const sendFriendRequest = useCallback(() => {
-    // Usually only relevant in Main Chat to convert stranger to friend
     if (mainConnRef.current && status === ChatMode.CONNECTED && userProfile) {
       mainConnRef.current.send({ type: 'friend_request', payload: userProfile });
     }
   }, [status, userProfile]);
 
   const acceptFriendRequest = useCallback(() => {
-    // Can be either context, but usually main
     if (incomingFriendRequest && userProfile) {
       saveFriend(incomingFriendRequest.profile, incomingFriendRequest.peerId);
       
-      // Try to send accept back via whatever connection we have for that peer
       const directConn = directConnsRef.current.get(incomingFriendRequest.peerId);
       if (directConn && directConn.open) {
          directConn.send({ type: 'friend_accept', payload: userProfile });
@@ -597,7 +608,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [incomingFriendRequest, userProfile, saveFriend]);
 
   const disconnect = useCallback(() => {
-    // Only disconnect main chat (Stranger)
     if (partnerProfile && mainConnRef.current?.peer) {
       saveToRecent(partnerProfile, mainConnRef.current.peer);
     }
@@ -605,7 +615,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [cleanupMain, partnerProfile, saveToRecent]);
 
   useEffect(() => {
-    // Full cleanup on unmount
     return () => {
       cleanupMain();
       directConnsRef.current.forEach(c => c.close());
@@ -628,9 +637,9 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     friends,
     incomingFriendRequest,
     incomingReaction,
-    incomingDirectMessage, // New export
+    incomingDirectMessage, 
     sendMessage, 
-    sendDirectMessage, // New export
+    sendDirectMessage,
     sendImage,
     sendAudio,
     sendReaction,

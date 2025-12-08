@@ -52,7 +52,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   
   // Notification State
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
-  const [globalUnread, setGlobalUnread] = useState(false);
   
   // Inputs
   const [globalInput, setGlobalInput] = useState('');
@@ -259,7 +258,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
       {/* FAB Trigger - Updated sizing and positioning for better visibility across devices */}
       <button 
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-28 right-5 sm:bottom-10 sm:right-10 z-[60] w-14 h-14 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-2xl shadow-brand-500/40 transition-transform hover:scale-105 active:scale-95 flex items-center justify-center border-[3px] border-slate-50 dark:border-slate-900 relative"
+        className="fixed bottom-24 right-5 sm:bottom-10 sm:right-10 z-[60] w-14 h-14 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-2xl shadow-brand-500/40 transition-transform hover:scale-105 active:scale-95 flex items-center justify-center border-[3px] border-slate-50 dark:border-slate-900 relative"
         aria-label="Open Social Hub"
       >
         <Users size={26} strokeWidth={2.5} />
@@ -289,9 +288,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                        {activePeer.profile.username}
                      </h2>
                      <div className="flex items-center gap-1.5">
-                       {/* This status is tricky because 'chatStatus' reflects main chat. 
-                           For Social Hub, we are always effectively "connected" via lobby or direct.
-                           We'll assume online if in online list. */}
+                       {/* Status assumed online if in list */}
                        {onlineUsers.some(u => u.peerId === activePeer.id) ? (
                           <span className="text-xs text-emerald-500 font-medium flex items-center gap-1">
                             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"/> Online
@@ -335,7 +332,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                          {tab === 'global' && <Globe size={14} />}
                          {tab}
                          
-                         {/* Tab specific dots could be added here based on logic */}
                          {tab === 'friends' && friends.some(f => unreadCounts[f.id] > 0) && (
                             <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
                          )}
