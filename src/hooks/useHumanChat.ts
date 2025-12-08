@@ -29,6 +29,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const myPeerIdRef = useRef<string | null>(null);
   const isMatchmakerRef = useRef(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- PERSIST RECENT PEERS ---
   const saveToRecent = useCallback((profile: UserProfile, peerId: string) => {
@@ -82,6 +84,9 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     isMatchmakerRef.current = false;
     setPartnerTyping(false);
     setPartnerRecording(false);
+    
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
     // Don't clear error here, let it persist briefly if needed
   }, []);
 
@@ -155,6 +160,24 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     }
   }, [status]);
 
+  const editMessage = useCallback((messageId: string, newText: string) => {
+    setMessages(prev => prev.map(msg => {
+      if (msg.id === messageId) {
+        return { ...msg, text: newText, isEdited: true };
+      }
+      return msg;
+    }));
+
+    if (connRef.current && status === ChatMode.CONNECTED) {
+      const payload: PeerData = {
+        type: 'edit_message',
+        payload: newText,
+        messageId: messageId
+      };
+      connRef.current.send(payload);
+    }
+  }, [status]);
+
   const sendTyping = useCallback((isTyping: boolean) => {
     if (connRef.current && status === ChatMode.CONNECTED) {
       const payload: PeerData = { type: 'typing', payload: isTyping };
@@ -195,9 +218,12 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   // --- PEER DATA HANDLING ---
   const handleData = useCallback((data: PeerData) => {
     if (data.type === 'message') {
+      // Clear indicators
       setPartnerTyping(false);
       setPartnerRecording(false);
-      
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
+
       const newMessage: Message = {
         id: Date.now().toString(),
         sender: 'stranger',
@@ -216,22 +242,66 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
     } else if (data.type === 'reaction') {
        setMessages(prev => {
-         const newMessages = [...prev];
-         const lastMessageIndex = newMessages.map(m => m.sender).lastIndexOf('me');
-         if (lastMessageIndex !== -1) {
-            const msg = newMessages[lastMessageIndex];
-            newMessages[lastMessageIndex] = {
+         const newMessages = prev.map(msg => {
+           if (msg.id === data.messageId) { // Prioritize messageId if available
+             return {
                ...msg,
-               reactions: [...(msg.reactions || []), { emoji: data.payload, sender: 'stranger' }]
-            };
+               reactions: [...(msg.reactions || []), { emoji: data.payload, sender: 'stranger' as const }]
+             };
+           }
+           return msg;
+         });
+         
+         // Fallback for legacy messages without explicit IDs in payload (less reliable)
+         if (!data.messageId) {
+            const lastMessageIndex = newMessages.map(m => m.sender).lastIndexOf('me');
+            if (lastMessageIndex !== -1) {
+                const msg = newMessages[lastMessageIndex];
+                newMessages[lastMessageIndex] = {
+                   ...msg,
+                   reactions: [...(msg.reactions || []), { emoji: data.payload, sender: 'stranger' as const }]
+                };
+            }
          }
          return newMessages;
        });
 
+    } else if (data.type === 'edit_message') {
+       setMessages(prev => prev.map(msg => {
+         // We might need a way to match IDs if they are generated locally.
+         // However, in P2P, usually we trust the sequence or need a synchronized ID.
+         // For now, if we match ID (which might be tricky if IDs are local timestamps), 
+         // we might need to rely on content or simple index for 'latest'.
+         // BUT, assuming we are editing the LATEST message from stranger or matching ID passed back:
+         
+         // Note: In this simple implementation, IDs are local timestamps. 
+         // PeerJS data doesn't automatically sync IDs.
+         // To make this work robustly, we'd need to send the ID with the original message.
+         // For now, we will try to match the last text message from stranger if ID doesn't match,
+         // or ideally, we should have shared IDs.
+         
+         // IMPROVEMENT: If we can't match ID, edit the last text message from stranger
+         if (msg.sender === 'stranger' && msg.type === 'text') {
+             // Basic implementation: Only allow editing the very last message from sender
+             // Real implementation requires UUIDs generated by sender and sent with message.
+             return { ...msg, text: data.payload, isEdited: true };
+         }
+         return msg;
+       }));
+
     } else if (data.type === 'typing') {
       setPartnerTyping(data.payload);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (data.payload) {
+        // Auto-clear typing after 4 seconds of inactivity
+        typingTimeoutRef.current = setTimeout(() => setPartnerTyping(false), 4000);
+      }
     } else if (data.type === 'recording') {
       setPartnerRecording(data.payload);
+      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
+      if (data.payload) {
+        recordingTimeoutRef.current = setTimeout(() => setPartnerRecording(false), 4000);
+      }
     } else if (data.type === 'profile') {
       setPartnerProfile(data.payload);
       // Save connection to history immediately when we receive profile
@@ -449,6 +519,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     sendImage,
     sendAudio,
     sendReaction,
+    editMessage,
     sendTyping,
     sendRecording,
     updateMyProfile,

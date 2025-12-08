@@ -3,18 +3,25 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Message } from '../types';
 import { clsx } from 'clsx';
-import { Smile } from 'lucide-react';
+import { Smile, Pencil } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
   senderName?: string;
   textSize?: 'small' | 'medium' | 'large';
   onReact?: (emoji: string) => void;
+  onEdit?: (messageId: string, text: string) => void;
 }
 
 const PRESET_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderName, textSize = 'medium', onReact }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ 
+  message, 
+  senderName, 
+  textSize = 'medium', 
+  onReact,
+  onEdit
+}) => {
   const [showPicker, setShowPicker] = useState(false);
   const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -76,21 +83,33 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
     setShowPicker(false);
   };
 
+  const handleEditClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onEdit && message.text) {
+      onEdit(message.id, message.text);
+    }
+  };
+
   // Format timestamp using user's local timezone and preference
   const formatTime = (timestamp: number) => {
     try {
       return new Date(timestamp).toLocaleTimeString(undefined, {
         hour: 'numeric',
         minute: '2-digit',
-        hour12: true // explicit preference for 12-hour clock in chat generally reads better, but undefined locale respects user settings
+        hour12: true
       });
     } catch (e) {
       return '';
     }
   };
 
+  // Entry animation based on sender
+  const entryAnimation = isMe 
+    ? "animate-in slide-in-from-right-10 fade-in duration-300" 
+    : "animate-in slide-in-from-left-10 fade-in duration-300";
+
   return (
-    <div className={clsx("flex w-full mb-6 group relative", isMe ? "justify-end" : "justify-start")}>
+    <div className={clsx("flex w-full mb-6 group relative", isMe ? "justify-end" : "justify-start", entryAnimation)}>
       
       {/* Reaction Picker Popover */}
       {showPicker && (
@@ -107,6 +126,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
                {emoji}
              </button>
            ))}
+           {/* Edit Option in Picker for Mobile */}
+           {isMe && message.type === 'text' && onEdit && (
+              <button
+                onClick={(e) => { handleEditClick(e); setShowPicker(false); }}
+                className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-slate-500"
+              >
+                <Pencil size={14} />
+              </button>
+           )}
         </div>
       )}
 
@@ -115,58 +143,76 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
             {displayName}
         </div>
         
-        <div 
-          ref={bubbleRef}
-          onContextMenu={handleContextMenu}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-          className={clsx(
-            "rounded-2xl shadow-sm relative transition-all overflow-visible select-none active:scale-[0.98]",
-            isMe 
-              ? "bg-brand-50 dark:bg-brand-600 text-slate-900 dark:text-white rounded-tr-none border border-brand-100 dark:border-brand-500" 
-              : "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white rounded-tl-none border border-slate-200 dark:border-slate-700"
-          )}
-        >
-          {message.type === 'text' && (
-             <div className={clsx("px-5 py-3 leading-relaxed break-words whitespace-pre-wrap", textSizeClass)}>
-               {message.text}
-             </div>
+        <div className="relative group/bubble">
+          {/* Edit Button (Desktop Hover) */}
+          {isMe && message.type === 'text' && onEdit && (
+             <button 
+               onClick={handleEditClick}
+               className="absolute -left-8 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400 opacity-0 group-hover/bubble:opacity-100 transition-opacity hidden sm:block hover:bg-slate-200 dark:hover:bg-white/20"
+             >
+               <Pencil size={12} />
+             </button>
           )}
 
-          {message.type === 'image' && message.fileData && (
-            <div className="p-1">
-               <img 
-                 src={message.fileData} 
-                 alt="Attachment" 
-                 className="max-w-full rounded-xl max-h-[300px] object-cover"
-               />
-            </div>
-          )}
+          <div 
+            ref={bubbleRef}
+            onContextMenu={handleContextMenu}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            onDoubleClick={() => setShowPicker(true)}
+            className={clsx(
+              "rounded-2xl shadow-sm relative transition-all overflow-visible select-none active:scale-[0.98]",
+              isMe 
+                ? "bg-brand-50 dark:bg-brand-600 text-slate-900 dark:text-white rounded-tr-none border border-brand-100 dark:border-brand-500" 
+                : "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white rounded-tl-none border border-slate-200 dark:border-slate-700"
+            )}
+          >
+            {message.type === 'text' && (
+              <div className={clsx("px-5 py-3 leading-relaxed break-words whitespace-pre-wrap relative", textSizeClass)}>
+                {message.text}
+                {message.isEdited && (
+                  <span className="text-[10px] text-slate-400 dark:text-slate-300 italic ml-2 opacity-70">
+                    (edited)
+                  </span>
+                )}
+              </div>
+            )}
 
-          {message.type === 'audio' && message.fileData && (
-            <div className="px-3 py-2 flex items-center gap-2 min-w-[200px]">
-               <audio controls src={message.fileData} className="w-full h-8 max-w-[250px]" />
-            </div>
-          )}
+            {message.type === 'image' && message.fileData && (
+              <div className="p-1">
+                <img 
+                  src={message.fileData} 
+                  alt="Attachment" 
+                  className="max-w-full rounded-xl max-h-[300px] object-cover"
+                />
+              </div>
+            )}
 
-          {/* Reactions Display */}
-          {message.reactions && message.reactions.length > 0 && (
-             <div className={clsx(
-               "absolute -bottom-4 flex gap-1",
-               isMe ? "right-0" : "left-0"
-             )}>
-                {message.reactions.map((r, idx) => (
-                  <div key={idx} className="bg-white dark:bg-slate-700 shadow-sm border border-slate-100 dark:border-white/5 rounded-full px-1.5 py-0.5 text-[10px] animate-in zoom-in spin-in-12">
-                    {r.emoji}
-                  </div>
-                ))}
-             </div>
-          )}
+            {message.type === 'audio' && message.fileData && (
+              <div className="px-3 py-2 flex items-center gap-2 min-w-[200px]">
+                <audio controls src={message.fileData} className="w-full h-8 max-w-[250px]" />
+              </div>
+            )}
+
+            {/* Reactions Display */}
+            {message.reactions && message.reactions.length > 0 && (
+              <div className={clsx(
+                "absolute -bottom-4 flex gap-1",
+                isMe ? "right-0" : "left-0"
+              )}>
+                  {message.reactions.map((r, idx) => (
+                    <div key={idx} className="bg-white dark:bg-slate-700 shadow-sm border border-slate-100 dark:border-white/5 rounded-full px-1.5 py-0.5 text-[10px] animate-in zoom-in spin-in-12">
+                      {r.emoji}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
         </div>
         
         {/* Actions (Only for stranger messages, visualized for demo) */}
         {!isMe && (
-           <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity px-1">
+           <div className="flex gap-2 mt-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity px-1">
               <button 
                 onClick={() => setShowPicker(!showPicker)}
                 className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"

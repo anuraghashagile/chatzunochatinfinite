@@ -17,6 +17,7 @@ interface SocialHubProps {
   currentPartner: UserProfile | null;
   chatStatus: ChatMode;
   error?: string | null;
+  onEditMessage?: (id: string, text: string) => void;
 }
 
 export const SocialHub: React.FC<SocialHubProps> = ({ 
@@ -31,7 +32,8 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   sendReaction,
   currentPartner,
   chatStatus,
-  error
+  error,
+  onEditMessage
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global'>('online');
@@ -57,7 +59,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
         }
       }
     }
-  }, [isOpen, chatStatus]); // Reload when status changes (after new connection)
+  }, [isOpen, chatStatus]); // Reload when status changes
 
   // Auto-scroll Global Chat
   useEffect(() => {
@@ -194,13 +196,14 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                         <div 
                           key={i} 
                           onClick={() => {
-                            if (user.peerId !== myPeerId && user.status !== 'busy') {
+                            // ALLOW CLICKING EVERYONE EXCEPT SELF
+                            if (user.peerId !== myPeerId) {
                               handleUserClick(user.peerId, user.profile);
                             }
                           }}
                           className={clsx(
                             "flex flex-col p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-white/5 transition-all group relative overflow-hidden",
-                            (user.peerId === myPeerId || user.status === 'busy') 
+                            (user.peerId === myPeerId)
                               ? "opacity-60 cursor-not-allowed" 
                               : "cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 hover:scale-[1.02] active:scale-[0.98]"
                           )}
@@ -239,7 +242,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                           </div>
                           
                           {/* Visual Cue for Clickability */}
-                          {user.peerId !== myPeerId && user.status !== 'busy' && (
+                          {user.peerId !== myPeerId && (
                             <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
                               <MessageCircle size={20} className="text-brand-500" />
                             </div>
@@ -347,6 +350,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                           message={msg}
                           senderName={currentPartner?.username}
                           onReact={sendReaction ? (emoji) => sendReaction(msg.id, emoji) : undefined}
+                          onEdit={onEditMessage}
                        />
                      ))}
                      {privateMessages.length === 0 && !error && (

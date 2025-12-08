@@ -34,13 +34,14 @@ export interface Message {
   timestamp: number;
   isVanish?: boolean;
   reactions?: Reaction[]; // Added for reactions
+  isEdited?: boolean; // Added for edit status
 }
 
 export interface PeerData {
-  type: 'message' | 'typing' | 'recording' | 'disconnect' | 'profile' | 'profile_update' | 'vanish_mode' | 'reaction';
+  type: 'message' | 'typing' | 'recording' | 'disconnect' | 'profile' | 'profile_update' | 'vanish_mode' | 'reaction' | 'edit_message';
   payload?: any;
   dataType?: MessageType;
-  messageId?: string; // For targeting specific messages (reactions)
+  messageId?: string; // For targeting specific messages (reactions/edits)
 }
 
 // Presence state for the lobby

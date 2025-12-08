@@ -11,6 +11,7 @@ import { LandingPage } from './components/LandingPage';
 import { JoinModal } from './components/JoinModal';
 import { SettingsModal } from './components/SettingsModal';
 import { SocialHub } from './components/SocialHub';
+import { EditMessageModal } from './components/EditMessageModal';
 import { NOTIFICATION_SOUND } from './constants';
 import { clsx } from 'clsx';
 
@@ -39,6 +40,9 @@ export default function App() {
     textSize: 'medium',
     vanishMode: false
   });
+
+  // Edit State
+  const [editingMessage, setEditingMessage] = useState<{id: string, text: string} | null>(null);
   
   const [isRecording, setIsRecording] = useState(false);
   const userId = useRef(getStoredUserId()).current;
@@ -53,29 +57,45 @@ export default function App() {
   // Initialize Chat Hooks
   const { 
     messages,
-    setMessages, // Exposed to handle message deletion
+    setMessages, 
     status, 
     partnerTyping, 
     partnerRecording,
     partnerProfile,
     remoteVanishMode,
-    onlineUsers, // Get online list
-    myPeerId, // Get my peer ID
-    error, // New error state
+    onlineUsers, 
+    myPeerId, 
+    error, 
     sendMessage, 
     sendImage, 
     sendAudio,
     sendReaction,
+    editMessage,
     sendTyping, 
     sendRecording,
     updateMyProfile,
     sendVanishMode,
     connect, 
-    callPeer, // Get direct call capability
+    callPeer, 
     disconnect 
   } = useHumanChat(userProfile);
 
   const { globalMessages, sendGlobalMessage } = useGlobalChat(userProfile);
+
+  // --- AUTO LOGIN ---
+  useEffect(() => {
+    const savedProfile = localStorage.getItem('chat_user_profile');
+    if (savedProfile) {
+      try {
+        const parsed = JSON.parse(savedProfile);
+        setUserProfile(parsed);
+        // Defer connection slightly to ensure hydration
+        setTimeout(() => connect(), 100);
+      } catch (e) {
+        console.error("Failed to load profile", e);
+      }
+    }
+  }, []); // Run once on mount
 
   // --- SOUND EFFECTS ---
   useEffect(() => {
@@ -90,12 +110,10 @@ export default function App() {
     }
   };
 
-  // Play sound on connection
   useEffect(() => {
     if (status === ChatMode.CONNECTED) playSound();
   }, [status]);
 
-  // Play sound on new personal message
   useEffect(() => {
     if (messages.length > 0 && messages[messages.length - 1].sender === 'stranger') {
       playSound();
@@ -109,20 +127,17 @@ export default function App() {
     }
   }, [remoteVanishMode]);
 
-  // --- AUTO-DELETE MESSAGES IN VANISH MODE ---
+  // --- AUTO-DELETE MESSAGES ---
   useEffect(() => {
-    // Timer to check for expired messages every second
     const interval = setInterval(() => {
       if (messages.some(m => m.isVanish)) {
         const now = Date.now();
         setMessages(prev => prev.filter(msg => {
           if (!msg.isVanish) return true;
-          // Keep if younger than 10 seconds
           return (now - msg.timestamp) < 10000;
         }));
       }
     }, 1000);
-
     return () => clearInterval(interval);
   }, [messages, setMessages]);
 
@@ -135,7 +150,6 @@ export default function App() {
     loadHistory();
   }, [userId]);
 
-  // Save outgoing messages to history
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
     if (lastMsg && lastMsg.sender === 'me' && !settings.vanishMode) {
@@ -162,12 +176,14 @@ export default function App() {
   const handleStartClick = () => setShowJoinModal(true);
 
   const handleJoin = (profile: UserProfile) => {
+    localStorage.setItem('chat_user_profile', JSON.stringify(profile));
     setUserProfile(profile);
     setShowJoinModal(false);
     connect();
   };
 
   const handleUpdateProfile = (profile: UserProfile) => {
+    localStorage.setItem('chat_user_profile', JSON.stringify(profile));
     setUserProfile(profile);
     updateMyProfile(profile);
     setShowEditProfileModal(false);
@@ -186,7 +202,6 @@ export default function App() {
     
     sendMessage(inputText);
     
-    // Manually add isVanish flag for local rendering if enabled (sender side)
     if (settings.vanishMode) {
       setMessages(prev => {
         const last = prev[prev.length - 1];
@@ -215,7 +230,18 @@ export default function App() {
     setTimeout(connect, 200);
   };
 
-  // --- IMAGE UPLOAD ---
+  const initiateEdit = (id: string, text: string) => {
+    setEditingMessage({ id, text });
+  };
+
+  const saveEditedMessage = (newText: string) => {
+    if (editingMessage) {
+      editMessage(editingMessage.id, newText);
+      setEditingMessage(null);
+    }
+  };
+
+  // --- IMAGE & AUDIO HANDLERS ---
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -223,8 +249,6 @@ export default function App() {
       reader.onloadend = () => {
         const base64 = reader.result as string;
         sendImage(base64);
-        
-        // Handle vanish flag for images locally
         if (settings.vanishMode) {
            setTimeout(() => {
              setMessages(prev => {
@@ -243,20 +267,15 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // --- AUDIO RECORDING ---
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
-
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
-
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
@@ -264,8 +283,6 @@ export default function App() {
         reader.onloadend = () => {
            const base64Audio = reader.result as string;
            sendAudio(base64Audio);
-           
-           // Handle vanish flag for audio locally
            if (settings.vanishMode) {
              setTimeout(() => {
                setMessages(prev => {
@@ -281,7 +298,6 @@ export default function App() {
         };
         stream.getTracks().forEach(track => track.stop());
       };
-
       mediaRecorder.start();
       setIsRecording(true);
       sendRecording(true);
@@ -299,39 +315,17 @@ export default function App() {
     }
   };
 
-  // --- 1. LANDING PAGE ---
-  if (status === ChatMode.IDLE && !userProfile) {
-    return (
-      <>
-        <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />
-        {showJoinModal && (
-          <JoinModal 
-            onClose={() => setShowJoinModal(false)} 
-            onJoin={handleJoin} 
-          />
-        )}
-      </>
-    );
-  }
+  // --- VIEW RENDERING LOGIC ---
+  const renderMainContent = () => {
+    // 1. Landing Page (Only if IDLE and no profile)
+    if (status === ChatMode.IDLE && !userProfile) {
+      return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
+    }
 
-  // --- 2. CONNECTING SCREEN ---
-  if (status === ChatMode.SEARCHING || status === ChatMode.WAITING) {
-    return (
-      <div className="h-[100dvh] bg-white dark:bg-slate-950 flex flex-col transition-colors overflow-hidden relative">
-        <Header 
-           onlineCount={onlineUsers.length} mode={status} theme={theme} toggleTheme={toggleTheme} onDisconnect={() => {}} partnerProfile={null} onOpenSettings={() => setShowSettingsModal(true)} onEditProfile={() => setShowEditProfileModal(true)}
-        />
-        
-        {/* Error Toast */}
-        {error && (
-          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-5">
-             <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
-               <AlertTriangle size={16} /> {error}
-             </div>
-          </div>
-        )}
-
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+    // 2. Waiting / Connecting Screen
+    if (status === ChatMode.SEARCHING || status === ChatMode.WAITING) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center p-6 text-center">
           <div className="relative mb-8">
             <div className="absolute inset-0 bg-brand-500 blur-2xl opacity-20 animate-pulse"></div>
             <div className="relative z-10 p-6 bg-slate-50 dark:bg-slate-900 rounded-full shadow-2xl border border-slate-200 dark:border-slate-800">
@@ -349,33 +343,91 @@ export default function App() {
           </div>
           <Button variant="secondary" onClick={() => { disconnect(); }}>Cancel</Button>
         </div>
-        
-        {/* Social Hub available even while waiting */}
-        {userProfile && (
-          <SocialHub 
-            onlineUsers={onlineUsers} 
-            onCallPeer={callPeer}
-            globalMessages={globalMessages}
-            sendGlobalMessage={sendGlobalMessage}
-            myProfile={userProfile}
-            myPeerId={myPeerId}
-            // Pass private chat props
-            privateMessages={messages}
-            sendPrivateMessage={sendMessage}
-            sendReaction={sendReaction}
-            currentPartner={partnerProfile}
-            chatStatus={status}
-            error={error}
-          />
-        )}
+      );
+    }
+
+    // 3. Active Chat Screen
+    return (
+      <div className="flex-1 flex flex-col h-full relative">
+         {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2 w-full max-w-4xl mx-auto z-10 relative scroll-smooth">
+          {!partnerProfile && status === ChatMode.CONNECTED && (
+              <div className="text-center text-xs text-slate-400 my-4">Connected encrypted connection...</div>
+          )}
+          
+          {messages.map((msg) => (
+              <div key={msg.id} className={clsx("transition-opacity duration-1000", msg.isVanish && "animate-pulse")}>
+                <MessageBubble 
+                    message={msg} 
+                    senderName={partnerProfile?.username} 
+                    textSize={settings.textSize}
+                    onReact={(emoji) => sendReaction(msg.id, emoji)}
+                    onEdit={initiateEdit}
+                />
+              </div>
+          ))}
+
+          {(status === ChatMode.DISCONNECTED || status === ChatMode.IDLE) && (
+              <div className="py-8 flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 mt-8 border-t border-slate-100 dark:border-white/5 pt-8">
+                <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400"><Shield size={32} /></div>
+                <div className="text-center space-y-1">
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">Chat Ended</h3>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">You have disconnected.</p>
+                </div>
+                <Button onClick={handleNewChat} className="shadow-lg shadow-brand-500/20 px-8"><RefreshCw size={18} /> Find New Stranger</Button>
+              </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input Area */}
+        <div className={clsx(
+          "border-t shrink-0 w-full z-20 pb-[env(safe-area-inset-bottom)] transition-colors",
+          settings.vanishMode ? "bg-[#1a0b2e] dark:bg-[#1a0b2e] border-purple-500/30" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/5",
+          status !== ChatMode.CONNECTED && "opacity-50 pointer-events-none grayscale"
+        )}>
+          <div className="max-w-4xl mx-auto p-2 sm:p-4">
+            {partnerTyping && (
+              <div className="h-5 px-4 mb-1 text-xs text-brand-500 font-medium animate-pulse flex items-center gap-1">
+                  typing...
+              </div>
+            )}
+
+            <form onSubmit={handleSendMessage} className="flex gap-2 items-end">
+              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} disabled={status !== ChatMode.CONNECTED}/>
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-3 text-slate-400 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50 shrink-0"><ImageIcon size={24} /></button>
+              {!inputText.trim() && (
+                  isRecording ? (
+                    <button type="button" onClick={stopRecording} className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-lg shadow-red-500/20 transition-all animate-pulse shrink-0"><Square size={24} fill="currentColor" /></button>
+                  ) : (
+                    <button type="button" onClick={startRecording} className="p-3 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-200 rounded-xl transition-all active:scale-95 disabled:opacity-50 shrink-0" disabled={status !== ChatMode.CONNECTED}><Mic size={24} /></button>
+                  )
+              )}
+
+              <div className={clsx("relative flex-1 rounded-2xl flex items-center min-h-[50px] bg-slate-100 dark:bg-slate-800")}>
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={handleTyping}
+                  placeholder={status === ChatMode.CONNECTED ? (settings.vanishMode ? "Vanish message..." : "Type a message...") : "Disconnected"}
+                  className="w-full bg-transparent border-0 px-4 py-3 placeholder:text-slate-400 focus:outline-none text-slate-900 dark:text-white"
+                  autoComplete="off"
+                />
+              </div>
+
+              {inputText.trim() && (
+                <button type="submit" className="p-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl shadow-lg shadow-brand-500/20 transition-all active:scale-95 shrink-0"><Send size={24} /></button>
+              )}
+            </form>
+          </div>
+        </div>
       </div>
     );
-  }
+  };
 
-  // --- 3. MAIN CHAT SCREEN ---
   return (
     <div className={clsx(
-      "flex flex-col h-[100dvh] bg-slate-50 dark:bg-slate-950 transition-colors fixed inset-0 overflow-hidden",
+      "h-[100dvh] bg-slate-50 dark:bg-slate-950 transition-colors flex flex-col fixed inset-0 overflow-hidden",
       settings.vanishMode && "dark:bg-slate-950" 
     )}>
       
@@ -383,16 +435,31 @@ export default function App() {
         <div className="absolute inset-0 pointer-events-none z-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
       )}
 
-      {/* Error Toast in Chat */}
-      {error && (
-          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-5">
-             <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
-               <AlertTriangle size={16} /> {error}
-             </div>
-          </div>
+      {/* Header - Always Visible if not IDLE */}
+      {(status !== ChatMode.IDLE || userProfile) && (
+        <Header 
+          onlineCount={onlineUsers.length} 
+          mode={status} 
+          theme={theme}
+          toggleTheme={toggleTheme}
+          onDisconnect={() => disconnect()}
+          partnerProfile={partnerProfile}
+          onOpenSettings={() => setShowSettingsModal(true)}
+          onEditProfile={() => setShowEditProfileModal(true)}
+        />
       )}
 
-      {settings.vanishMode && (
+      {/* Error Toast */}
+      {error && (
+         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-5">
+            <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
+              <AlertTriangle size={16} /> {error}
+            </div>
+         </div>
+      )}
+
+      {/* Vanish Mode Badge */}
+      {settings.vanishMode && status === ChatMode.CONNECTED && (
          <div className="absolute top-16 left-0 right-0 z-40 flex justify-center pointer-events-none animate-in slide-in-from-top-4">
             <div className="bg-purple-500/10 backdrop-blur-md border border-purple-500/20 px-4 py-1.5 rounded-b-xl text-[10px] font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-purple-900/20">
                <EyeOff size={12} />
@@ -401,95 +468,31 @@ export default function App() {
          </div>
       )}
 
-      <Header 
-        onlineCount={onlineUsers.length} 
-        mode={status} 
-        theme={theme}
-        toggleTheme={toggleTheme}
-        onDisconnect={() => disconnect()}
-        partnerProfile={partnerProfile}
-        onOpenSettings={() => setShowSettingsModal(true)}
-        onEditProfile={() => setShowEditProfileModal(true)}
-      />
+      {/* Main Content Area */}
+      {renderMainContent()}
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2 w-full max-w-4xl mx-auto z-10 relative scroll-smooth">
-         {!partnerProfile && status === ChatMode.CONNECTED && (
-            <div className="text-center text-xs text-slate-400 my-4">Connected encrypted connection...</div>
-         )}
-         
-         {messages.map((msg) => (
-            <div key={msg.id} className={clsx("transition-opacity duration-1000", msg.isVanish && "animate-pulse")}>
-               <MessageBubble 
-                  message={msg} 
-                  senderName={partnerProfile?.username} 
-                  textSize={settings.textSize}
-                  onReact={(emoji) => sendReaction(msg.id, emoji)}
-               />
-            </div>
-         ))}
-
-         {(status === ChatMode.DISCONNECTED || status === ChatMode.IDLE) && (
-            <div className="py-8 flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 mt-8 border-t border-slate-100 dark:border-white/5 pt-8">
-              <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400"><Shield size={32} /></div>
-              <div className="text-center space-y-1">
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white">Chat Ended</h3>
-                <p className="text-slate-500 dark:text-slate-400 text-sm">You have disconnected.</p>
-              </div>
-              <Button onClick={handleNewChat} className="shadow-lg shadow-brand-500/20 px-8"><RefreshCw size={18} /> Find New Stranger</Button>
-            </div>
-         )}
-         <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input Area */}
-      <div className={clsx(
-        "border-t shrink-0 w-full z-20 pb-[env(safe-area-inset-bottom)] transition-colors",
-        settings.vanishMode ? "bg-[#1a0b2e] dark:bg-[#1a0b2e] border-purple-500/30" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/5",
-        status !== ChatMode.CONNECTED && "opacity-50 pointer-events-none grayscale"
-      )}>
-        <div className="max-w-4xl mx-auto p-2 sm:p-4">
-           {partnerTyping && (
-             <div className="h-5 px-4 mb-1 text-xs text-brand-500 font-medium animate-pulse flex items-center gap-1">
-                 typing...
-             </div>
-           )}
-
-           <form onSubmit={handleSendMessage} className="flex gap-2 items-end">
-             <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} disabled={status !== ChatMode.CONNECTED}/>
-             <button type="button" onClick={() => fileInputRef.current?.click()} className="p-3 text-slate-400 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50 shrink-0"><ImageIcon size={24} /></button>
-             {!inputText.trim() && (
-                isRecording ? (
-                   <button type="button" onClick={stopRecording} className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-lg shadow-red-500/20 transition-all animate-pulse shrink-0"><Square size={24} fill="currentColor" /></button>
-                ) : (
-                   <button type="button" onClick={startRecording} className="p-3 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-200 rounded-xl transition-all active:scale-95 disabled:opacity-50 shrink-0" disabled={status !== ChatMode.CONNECTED}><Mic size={24} /></button>
-                )
-             )}
-
-            <div className={clsx("relative flex-1 rounded-2xl flex items-center min-h-[50px] bg-slate-100 dark:bg-slate-800")}>
-               <input
-                 type="text"
-                 value={inputText}
-                 onChange={handleTyping}
-                 placeholder={status === ChatMode.CONNECTED ? (settings.vanishMode ? "Vanish message..." : "Type a message...") : "Disconnected"}
-                 className="w-full bg-transparent border-0 px-4 py-3 placeholder:text-slate-400 focus:outline-none text-slate-900 dark:text-white"
-                 autoComplete="off"
-               />
-            </div>
-
-            {inputText.trim() && (
-              <button type="submit" className="p-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl shadow-lg shadow-brand-500/20 transition-all active:scale-95 shrink-0"><Send size={24} /></button>
-            )}
-          </form>
-        </div>
-      </div>
-
+      {/* Modals & Overlays */}
       <SettingsModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} settings={settings} onUpdateSettings={handleUpdateSettings}/>
+      
+      {showJoinModal && (
+        <JoinModal 
+           onClose={() => setShowJoinModal(false)} 
+           onJoin={handleJoin} 
+        />
+      )}
+      
       {showEditProfileModal && userProfile && (
         <JoinModal onClose={() => setShowEditProfileModal(false)} onJoin={handleUpdateProfile} initialProfile={userProfile} isEditing={true}/>
       )}
+      
+      <EditMessageModal 
+        isOpen={!!editingMessage}
+        onClose={() => setEditingMessage(null)}
+        initialText={editingMessage?.text || ''}
+        onSave={saveEditedMessage}
+      />
 
-      {/* Social Hub - Always accessible if logged in */}
+      {/* Social Hub - PERSISTENT COMPONENT (Outside conditional returns) */}
       {userProfile && (
         <SocialHub 
           onlineUsers={onlineUsers} 
@@ -498,13 +501,13 @@ export default function App() {
           sendGlobalMessage={sendGlobalMessage}
           myProfile={userProfile}
           myPeerId={myPeerId}
-          // Pass private chat props
           privateMessages={messages}
           sendPrivateMessage={sendMessage}
           sendReaction={sendReaction}
           currentPartner={partnerProfile}
           chatStatus={status}
           error={error}
+          onEditMessage={initiateEdit}
         />
       )}
     </div>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { X, Globe, ArrowRight } from 'lucide-react';
 import { UserProfile } from '../types';
@@ -9,8 +8,8 @@ import { clsx } from 'clsx';
 interface JoinModalProps {
   onClose: () => void;
   onJoin: (profile: UserProfile) => void;
-  initialProfile?: UserProfile | null; // Add this
-  isEditing?: boolean; // Add this
+  initialProfile?: UserProfile | null;
+  isEditing?: boolean;
 }
 
 export const JoinModal: React.FC<JoinModalProps> = ({ onClose, onJoin, initialProfile, isEditing = false }) => {
@@ -31,13 +30,18 @@ export const JoinModal: React.FC<JoinModalProps> = ({ onClose, onJoin, initialPr
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onJoin({
+    const profile = {
       username: name || 'Stranger',
       gender,
       age,
       interests,
       location: 'India (General)' 
-    });
+    };
+    
+    // Explicitly save to local storage here as well for immediate persistence
+    localStorage.setItem('chat_user_profile', JSON.stringify(profile));
+    
+    onJoin(profile);
   };
 
   return (
