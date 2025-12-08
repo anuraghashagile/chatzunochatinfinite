@@ -1,7 +1,6 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap } from 'lucide-react';
+import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle } from 'lucide-react';
 import { UserProfile, PresenceState, RecentPeer, Message, ChatMode } from '../types';
 import { clsx } from 'clsx';
 import { MessageBubble } from './MessageBubble';
@@ -21,7 +20,28 @@ interface SocialHubProps {
   sendReaction?: (messageId: string, emoji: string) => void;
   currentPartner: UserProfile | null;
   chatStatus: ChatMode;
+  error?: string | null;
 }
+
+const ErrorPopup = ({ onClose, message }: { onClose: () => void, message: string }) => (
+  <div className="absolute inset-0 z-[60] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 rounded-3xl">
+    <div className="bg-white dark:bg-[#1a1b26] p-6 rounded-3xl shadow-2xl w-full max-w-[280px] text-center border border-slate-200 dark:border-white/10 animate-in zoom-in-95 duration-200">
+       <div className="w-14 h-14 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+         <Wifi size={28} />
+       </div>
+       <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 leading-tight">Connection Failed</h3>
+       <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+         {message || "User is likely offline or has a new session ID."}
+       </p>
+       <button 
+         onClick={onClose} 
+         className="w-full py-3 bg-slate-900 dark:bg-white text-white dark:text-black rounded-xl font-bold text-sm hover:opacity-90 transition-opacity"
+       >
+         Okay
+       </button>
+    </div>
+  </div>
+);
 
 export const SocialHub: React.FC<SocialHubProps> = ({ 
   onlineUsers, 
@@ -34,13 +54,15 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   sendPrivateMessage,
   sendReaction,
   currentPartner,
-  chatStatus
+  chatStatus,
+  error
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global'>('online');
   const [recentPeers, setRecentPeers] = useState<RecentPeer[]>([]);
   const [globalInput, setGlobalInput] = useState('');
   const [privateInput, setPrivateInput] = useState('');
+  const [showErrorModal, setShowErrorModal] = useState(false);
   
   // 'list' = showing users tabs, 'chat' = showing active private chat
   const [viewMode, setViewMode] = useState<'list' | 'chat'>('list');
@@ -62,13 +84,12 @@ export const SocialHub: React.FC<SocialHubProps> = ({
     }
   }, [isOpen]);
 
-  // If chat disconnects, go back to list
+  // Handle errors
   useEffect(() => {
-    if (chatStatus !== ChatMode.CONNECTED && viewMode === 'chat') {
-       // Optional: stay in chat view to see history or go back?
-       // For now, let's allow them to stay but they will see "Disconnected" status in the UI
+    if (error && isOpen && viewMode === 'chat') {
+      setShowErrorModal(true);
     }
-  }, [chatStatus, viewMode]);
+  }, [error, isOpen, viewMode]);
 
   // Auto-scroll Global Chat
   useEffect(() => {
@@ -101,9 +122,13 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   };
 
   const handleUserClick = (peerId: string) => {
-    // Clicking row can also open chat, but we also have a dedicated button
-    onCallPeer(peerId);
     setViewMode('chat');
+    onCallPeer(peerId);
+  };
+
+  const closeError = () => {
+    setShowErrorModal(false);
+    setViewMode('list'); // Go back to list on error
   };
 
   return (
@@ -122,8 +147,12 @@ export const SocialHub: React.FC<SocialHubProps> = ({
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-end sm:p-6 bg-black/40 backdrop-blur-sm animate-in fade-in">
           
-          <div className="bg-white dark:bg-[#0A0A0F] w-full sm:w-[400px] h-[80dvh] max-h-[800px] sm:h-[600px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-white/10 animate-in slide-in-from-bottom-10 sm:slide-in-from-right-10 duration-300">
+          <div className="bg-white dark:bg-[#0A0A0F] w-full sm:w-[400px] h-[80dvh] max-h-[800px] sm:h-[600px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-white/10 animate-in slide-in-from-bottom-10 sm:slide-in-from-right-10 duration-300 relative">
             
+            {showErrorModal && (
+              <ErrorPopup onClose={closeError} message={error || "User Unavailable"} />
+            )}
+
             {/* Header */}
             <div className="p-4 border-b border-slate-100 dark:border-white/5 flex items-center justify-between bg-slate-50/50 dark:bg-white/5 shrink-0">
               
@@ -197,7 +226,17 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                       {onlineUsers.map((user, i) => (
                         <div 
                           key={i} 
-                          className="flex flex-col p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors group relative overflow-hidden"
+                          onClick={() => {
+                            if (user.peerId !== myPeerId && user.status !== 'busy') {
+                              handleUserClick(user.peerId);
+                            }
+                          }}
+                          className={clsx(
+                            "flex flex-col p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-white/5 transition-all group relative overflow-hidden",
+                            (user.peerId === myPeerId || user.status === 'busy') 
+                              ? "opacity-60 cursor-not-allowed" 
+                              : "cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 hover:scale-[1.02] active:scale-[0.98]"
+                          )}
                         >
                           <div className="flex items-start justify-between mb-3">
                              <div className="flex items-center gap-3">
@@ -234,7 +273,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
                           {/* Profile Bio/Interests */}
                           {user.profile?.interests && user.profile.interests.length > 0 && (
-                             <div className="flex flex-wrap gap-1.5 mb-4">
+                             <div className="flex flex-wrap gap-1.5">
                                {user.profile.interests.slice(0, 3).map((interest, idx) => (
                                  <span key={idx} className="px-2 py-0.5 bg-white dark:bg-black/20 text-slate-500 dark:text-slate-400 rounded-md text-[10px] font-medium border border-slate-100 dark:border-white/5">
                                    {interest}
@@ -245,16 +284,13 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                                )}
                              </div>
                           )}
-
-                          {/* Connect Button */}
-                          <button 
-                            onClick={() => handleUserClick(user.peerId)}
-                            disabled={user.peerId === myPeerId || user.status === 'busy'} 
-                            className="w-full py-2 bg-slate-900 dark:bg-white text-white dark:text-black rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                          >
-                             <Zap size={14} fill="currentColor" /> 
-                             {user.status === 'busy' ? 'Busy' : 'Connect'}
-                          </button>
+                          
+                          {/* Visual Cue for Clickability */}
+                          {user.peerId !== myPeerId && user.status !== 'busy' && (
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <MessageCircle size={20} className="text-brand-500" />
+                            </div>
+                          )}
                         </div>
                       ))}
                       {onlineUsers.length === 0 && (

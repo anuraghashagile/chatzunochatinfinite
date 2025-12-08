@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Loader2, RefreshCw, EyeOff, Shield, Image as ImageIcon, Mic, X, Square, AlertTriangle } from 'lucide-react';
 import { supabase, saveMessageToHistory, fetchChatHistory } from './lib/supabase';
@@ -367,6 +366,7 @@ export default function App() {
             sendReaction={sendReaction}
             currentPartner={partnerProfile}
             chatStatus={status}
+            error={error}
           />
         )}
       </div>
@@ -505,6 +505,7 @@ export default function App() {
           sendReaction={sendReaction}
           currentPartner={partnerProfile}
           chatStatus={status}
+          error={error}
         />
       )}
     </div>
