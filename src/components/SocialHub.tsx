@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle, Loader2 } from 'lucide-react';
-import { UserProfile, PresenceState, RecentPeer, Message, ChatMode, SessionType } from '../types';
+import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle, Loader2, UserPlus, Heart } from 'lucide-react';
+import { UserProfile, PresenceState, RecentPeer, Message, ChatMode, SessionType, Friend } from '../types';
 import { clsx } from 'clsx';
 import { MessageBubble } from './MessageBubble';
 
@@ -39,8 +39,9 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   sessionType
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global'>('online');
+  const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global' | 'friends'>('online');
   const [recentPeers, setRecentPeers] = useState<RecentPeer[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
   
   // Inputs
   const [globalInput, setGlobalInput] = useState('');
@@ -54,16 +55,18 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const privateMessagesEndRef = useRef<HTMLDivElement>(null);
 
-  // --- 1. LOAD RECENT PEERS ---
+  // --- 1. LOAD DATA ---
   useEffect(() => {
     if (isOpen) {
-      const stored = localStorage.getItem('recent_peers');
-      if (stored) {
-        try {
-          setRecentPeers(JSON.parse(stored));
-        } catch (e) {
-          console.error("Failed to parse recent peers", e);
-        }
+      // Load Recent
+      const storedRecents = localStorage.getItem('recent_peers');
+      if (storedRecents) {
+        try { setRecentPeers(JSON.parse(storedRecents)); } catch (e) {}
+      }
+      // Load Friends
+      const storedFriends = localStorage.getItem('chat_friends');
+      if (storedFriends) {
+        try { setFriends(JSON.parse(storedFriends)); } catch (e) {}
       }
     }
   }, [isOpen, chatStatus]);
@@ -86,19 +89,14 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   }, [activePeer]);
 
   // --- 3. SYNC REAL-TIME MESSAGES TO LOCAL HISTORY ---
-  // When 'privateMessages' (from App.tsx/useHumanChat) updates, we assume it's for the ACTIVE connection.
-  // We merge these into our local history for the active peer.
   useEffect(() => {
     if (activePeer && privateMessages.length > 0) {
-      // Get the last message received from the hook
       const lastMsg = privateMessages[privateMessages.length - 1];
       
       setLocalChatHistory(prev => {
-        // Avoid duplicates based on ID
         if (prev.some(m => m.id === lastMsg.id)) return prev;
         
         const newHistory = [...prev, lastMsg];
-        // Save to LS immediately
         localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(newHistory));
         return newHistory;
       });
@@ -120,7 +118,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
 
   // --- HANDLERS ---
-
   const handleGlobalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (globalInput.trim()) {
@@ -148,8 +145,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
       localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(updatedHistory));
 
       // 3. Send over Network (if connected)
-      // Note: sendPrivateMessage internally in useHumanChat might fail if disconnected, 
-      // but we've already saved it locally so the user sees it sent.
       sendPrivateMessage(privateInput);
 
       setPrivateInput('');
@@ -157,13 +152,13 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   };
 
   const openPrivateChat = (peerId: string, profile?: UserProfile) => {
-    // Set active peer UI immediately
     if (profile) {
       setActivePeer({ id: peerId, profile });
     }
-    
-    // Trigger connection in background (App.tsx handles this)
-    onCallPeer(peerId, profile);
+    // Only attempt call if not already connected to this person
+    if (currentPartner?.username !== profile?.username) {
+        onCallPeer(peerId, profile);
+    }
   };
 
   const closePrivateChat = () => {
@@ -178,6 +173,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
         className="fixed bottom-36 right-4 sm:bottom-6 sm:right-6 z-40 bg-brand-500 hover:bg-brand-600 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-4 border-slate-50 dark:border-slate-900"
       >
         <MessageCircle size={28} />
+        {/* Simple unread indicator could go here if implemented */}
       </button>
 
       {/* Drawer Overlay */}
@@ -205,8 +201,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                           </span>
                        ) : (
                           <span className="text-xs text-slate-400 font-medium">
-                             {/* Show simple status, never error */}
-                             Offline (Saved)
+                             Offline
                           </span>
                        )}
                      </div>
@@ -227,34 +222,23 @@ export const SocialHub: React.FC<SocialHubProps> = ({
             {!activePeer && (
               <>
                 {/* Tabs */}
-                <div className="flex p-1 bg-slate-100 dark:bg-slate-900 mx-4 mt-4 rounded-xl shrink-0">
-                  <button 
-                    onClick={() => setActiveTab('online')}
-                    className={clsx(
-                      "flex-1 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2",
-                      activeTab === 'online' ? "bg-white dark:bg-slate-800 text-brand-500 shadow-sm" : "text-slate-500"
-                    )}
-                  >
-                    <Wifi size={16} /> Online
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('recent')}
-                    className={clsx(
-                      "flex-1 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2",
-                      activeTab === 'recent' ? "bg-white dark:bg-slate-800 text-brand-500 shadow-sm" : "text-slate-500"
-                    )}
-                  >
-                    <History size={16} /> Recent
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('global')}
-                    className={clsx(
-                      "flex-1 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2",
-                      activeTab === 'global' ? "bg-white dark:bg-slate-800 text-brand-500 shadow-sm" : "text-slate-500"
-                    )}
-                  >
-                    <Globe size={16} /> Global
-                  </button>
+                <div className="flex p-1 bg-slate-100 dark:bg-slate-900 mx-4 mt-4 rounded-xl shrink-0 overflow-x-auto">
+                   {['online', 'friends', 'recent', 'global'].map((tab) => (
+                      <button 
+                        key={tab}
+                        onClick={() => setActiveTab(tab as any)}
+                        className={clsx(
+                          "flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 capitalize whitespace-nowrap",
+                          activeTab === tab ? "bg-white dark:bg-slate-800 text-brand-500 shadow-sm" : "text-slate-500"
+                        )}
+                      >
+                         {tab === 'online' && <Wifi size={14} />}
+                         {tab === 'friends' && <Heart size={14} />}
+                         {tab === 'recent' && <History size={14} />}
+                         {tab === 'global' && <Globe size={14} />}
+                         {tab}
+                      </button>
+                   ))}
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 scroll-smooth min-h-0">
@@ -274,10 +258,10 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                             "flex flex-col p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-white/5 transition-all group relative overflow-hidden",
                             (user.peerId === myPeerId)
                               ? "opacity-60 cursor-not-allowed" 
-                              : "cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 hover:scale-[1.02] active:scale-[0.98]"
+                              : "cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 active:scale-[0.98]"
                           )}
                         >
-                          <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-start justify-between">
                              <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-400 to-violet-500 flex items-center justify-center text-white font-bold shrink-0 shadow-lg">
                                   {user.profile?.username?.[0]?.toUpperCase() || '?'}
@@ -292,15 +276,52 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                                   </div>
                                 </div>
                              </div>
-                             
-                             <div className="flex items-center gap-2">
-                               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                             </div>
+                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                           </div>
                         </div>
                       ))}
                       {onlineUsers.length === 0 && <div className="text-center text-slate-500 py-10">No users found</div>}
                     </div>
+                  )}
+
+                  {/* --- FRIENDS TAB --- */}
+                  {activeTab === 'friends' && (
+                     <div className="space-y-3">
+                       {friends.map((friend) => (
+                         <div 
+                           key={friend.id} 
+                           onClick={() => openPrivateChat(friend.id, friend.profile)}
+                           className="flex items-center justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-white/5 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors group"
+                         >
+                           <div className="flex items-center gap-3">
+                             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white font-bold shrink-0">
+                               {friend.profile.username[0].toUpperCase()}
+                             </div>
+                             <div className="min-w-0">
+                               <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                 {friend.profile.username}
+                               </div>
+                               <div className="text-xs text-slate-500">
+                                  Added {new Date(friend.addedAt).toLocaleDateString()}
+                               </div>
+                             </div>
+                           </div>
+                           <div className="p-2 text-rose-400">
+                              <Heart size={18} fill="currentColor" />
+                           </div>
+                         </div>
+                       ))}
+                       {friends.length === 0 && (
+                         <div className="text-center py-10">
+                            <div className="w-16 h-16 bg-slate-100 dark:bg-white/5 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
+                               <UserPlus size={24} />
+                            </div>
+                            <p className="text-slate-500 dark:text-slate-400 text-sm">
+                              No friends yet.<br/>Connect with strangers to add them!
+                            </p>
+                         </div>
+                       )}
+                     </div>
                   )}
 
                   {/* --- RECENT TAB --- */}
@@ -348,7 +369,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                               </div>
                            </div>
                          ))}
-                         {globalMessages.length === 0 && <div className="text-center text-slate-500 text-sm">Welcome to Global Chat</div>}
                          <div ref={messagesEndRef} />
                       </div>
                       <form onSubmit={handleGlobalSubmit} className="mt-auto flex gap-2 shrink-0 pb-1">

@@ -1,6 +1,7 @@
 
+
 import React, { useState } from 'react';
-import { Infinity, Moon, Sun, Settings, ArrowLeft, Edit2, AlertTriangle } from 'lucide-react';
+import { Infinity, Moon, Sun, Settings, ArrowLeft, Edit2, AlertTriangle, UserPlus } from 'lucide-react';
 import { ChatMode, UserProfile } from '../types';
 
 interface HeaderProps {
@@ -12,6 +13,7 @@ interface HeaderProps {
   partnerProfile: UserProfile | null;
   onOpenSettings: () => void;
   onEditProfile: () => void;
+  onAddFriend?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -22,7 +24,8 @@ export const Header: React.FC<HeaderProps> = ({
   onDisconnect, 
   partnerProfile,
   onOpenSettings,
-  onEditProfile
+  onEditProfile,
+  onAddFriend
 }) => {
   const [showConfirmEnd, setShowConfirmEnd] = useState(false);
   const isConnected = mode === ChatMode.CONNECTED;
@@ -106,6 +109,15 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Logged In Actions */}
           {mode !== ChatMode.IDLE && (
             <>
+               {isConnected && onAddFriend && (
+                  <button 
+                    onClick={onAddFriend}
+                    className="p-2.5 text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded-full transition-colors"
+                    title="Add Friend"
+                  >
+                    <UserPlus size={18} />
+                  </button>
+               )}
                <button 
                  onClick={onEditProfile}
                  className="p-2.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full transition-colors"

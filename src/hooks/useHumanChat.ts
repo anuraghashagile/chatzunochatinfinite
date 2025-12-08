@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { supabase } from '../lib/supabase';
-import { Message, ChatMode, PeerData, PresenceState, UserProfile, RecentPeer } from '../types';
+import { Message, ChatMode, PeerData, PresenceState, UserProfile, RecentPeer, Friend, FriendRequest } from '../types';
 import { 
   INITIAL_GREETING, 
   STRANGER_DISCONNECTED_MSG, 
@@ -24,6 +24,10 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
+  // Friend System State
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [incomingFriendRequest, setIncomingFriendRequest] = useState<FriendRequest | null>(null);
+  
   const peerRef = useRef<Peer | null>(null);
   const connRef = useRef<DataConnection | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -31,6 +35,21 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const isMatchmakerRef = useRef(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // --- LOAD FRIENDS ---
+  useEffect(() => {
+    const loadFriends = () => {
+      try {
+        const stored = localStorage.getItem('chat_friends');
+        if (stored) {
+          setFriends(JSON.parse(stored));
+        }
+      } catch (e) {
+        console.warn("Failed to load friends", e);
+      }
+    };
+    loadFriends();
+  }, []);
 
   // --- PERSIST RECENT PEERS ---
   const saveToRecent = useCallback((profile: UserProfile, peerId: string) => {
@@ -57,6 +76,30 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       localStorage.setItem(key, JSON.stringify(recents));
     } catch (e) {
       console.warn('Failed to save recent peer', e);
+    }
+  }, []);
+
+  // --- SAVE FRIEND ---
+  const saveFriend = useCallback((profile: UserProfile, peerId: string) => {
+    const key = 'chat_friends';
+    try {
+      const existing = localStorage.getItem(key);
+      let friendList: Friend[] = existing ? JSON.parse(existing) : [];
+      
+      // Check if already exists
+      if (friendList.some(f => f.profile.username === profile.username)) return;
+
+      const newFriend: Friend = {
+        id: peerId, // Store current peerId, though it changes, mainly for ID purposes if we had auth
+        profile,
+        addedAt: Date.now()
+      };
+
+      friendList.unshift(newFriend);
+      localStorage.setItem(key, JSON.stringify(friendList));
+      setFriends(friendList);
+    } catch (e) {
+      console.warn("Failed to save friend", e);
     }
   }, []);
 
@@ -215,6 +258,22 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     }
   }, [status]);
 
+  const sendFriendRequest = useCallback(() => {
+    if (connRef.current && status === ChatMode.CONNECTED && userProfile) {
+      const payload: PeerData = { type: 'friend_request', payload: userProfile };
+      connRef.current.send(payload);
+    }
+  }, [status, userProfile]);
+
+  const acceptFriendRequest = useCallback(() => {
+    if (incomingFriendRequest && connRef.current && userProfile) {
+      saveFriend(incomingFriendRequest.profile, incomingFriendRequest.peerId);
+      const payload: PeerData = { type: 'friend_accept', payload: userProfile };
+      connRef.current.send(payload);
+      setIncomingFriendRequest(null);
+    }
+  }, [incomingFriendRequest, userProfile, saveFriend]);
+
   // --- PEER DATA HANDLING ---
   const handleData = useCallback((data: PeerData) => {
     if (data.type === 'message') {
@@ -243,7 +302,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     } else if (data.type === 'reaction') {
        setMessages(prev => {
          const newMessages = prev.map(msg => {
-           if (msg.id === data.messageId) { // Prioritize messageId if available
+           if (msg.id === data.messageId) {
              return {
                ...msg,
                reactions: [...(msg.reactions || []), { emoji: data.payload, sender: 'stranger' as const }]
@@ -251,39 +310,12 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
            }
            return msg;
          });
-         
-         // Fallback for legacy messages without explicit IDs in payload (less reliable)
-         if (!data.messageId) {
-            const lastMessageIndex = newMessages.map(m => m.sender).lastIndexOf('me');
-            if (lastMessageIndex !== -1) {
-                const msg = newMessages[lastMessageIndex];
-                newMessages[lastMessageIndex] = {
-                   ...msg,
-                   reactions: [...(msg.reactions || []), { emoji: data.payload, sender: 'stranger' as const }]
-                };
-            }
-         }
          return newMessages;
        });
 
     } else if (data.type === 'edit_message') {
        setMessages(prev => prev.map(msg => {
-         // We might need a way to match IDs if they are generated locally.
-         // However, in P2P, usually we trust the sequence or need a synchronized ID.
-         // For now, if we match ID (which might be tricky if IDs are local timestamps), 
-         // we might need to rely on content or simple index for 'latest'.
-         // BUT, assuming we are editing the LATEST message from stranger or matching ID passed back:
-         
-         // Note: In this simple implementation, IDs are local timestamps. 
-         // PeerJS data doesn't automatically sync IDs.
-         // To make this work robustly, we'd need to send the ID with the original message.
-         // For now, we will try to match the last text message from stranger if ID doesn't match,
-         // or ideally, we should have shared IDs.
-         
-         // IMPROVEMENT: If we can't match ID, edit the last text message from stranger
-         if (msg.sender === 'stranger' && msg.type === 'text') {
-             // Basic implementation: Only allow editing the very last message from sender
-             // Real implementation requires UUIDs generated by sender and sent with message.
+         if (msg.sender === 'stranger' && msg.type === 'text' && (!data.messageId || msg.id === data.messageId)) {
              return { ...msg, text: data.payload, isEdited: true };
          }
          return msg;
@@ -293,7 +325,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       setPartnerTyping(data.payload);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (data.payload) {
-        // Auto-clear typing after 4 seconds of inactivity
         typingTimeoutRef.current = setTimeout(() => setPartnerTyping(false), 4000);
       }
     } else if (data.type === 'recording') {
@@ -304,7 +335,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       }
     } else if (data.type === 'profile') {
       setPartnerProfile(data.payload);
-      // Save connection to history immediately when we receive profile
       if (connRef.current?.peer) {
         saveToRecent(data.payload, connRef.current.peer);
       }
@@ -313,15 +343,27 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       if (connRef.current?.peer) {
         saveToRecent(data.payload, connRef.current.peer);
       }
+    } else if (data.type === 'friend_request') {
+      // Received friend request
+      if (connRef.current?.peer) {
+        setIncomingFriendRequest({
+          profile: data.payload,
+          peerId: connRef.current.peer
+        });
+      }
+    } else if (data.type === 'friend_accept') {
+      // Friend request accepted
+      if (connRef.current?.peer) {
+        saveFriend(data.payload, connRef.current.peer);
+      }
     } else if (data.type === 'vanish_mode') {
       setRemoteVanishMode(data.payload);
     } else if (data.type === 'disconnect') {
       setStatus(ChatMode.DISCONNECTED);
       setMessages(prev => [...prev, STRANGER_DISCONNECTED_MSG]);
-      // Do not cleanup immediately to allow reading history
       if (connRef.current) { connRef.current.close(); }
     }
-  }, [saveToRecent]);
+  }, [saveToRecent, saveFriend]);
 
   const setupConnection = useCallback((conn: DataConnection) => {
     // Instead of untracking, mark as busy to keep visibility in Online list
@@ -352,7 +394,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         setStatus(ChatMode.DISCONNECTED);
         setMessages(prev => [...prev, STRANGER_DISCONNECTED_MSG]);
       }
-      // cleanup(); // Removed auto-cleanup to keep chat visible
     });
     
     (conn as any).on('error', (err: any) => {
@@ -419,6 +460,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     setPartnerProfile(null);
     setRemoteVanishMode(null);
     setError(null);
+    setIncomingFriendRequest(null);
     
     const peer = new Peer({
       debug: 1,
@@ -446,17 +488,16 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [cleanup, joinLobby, setupConnection]);
 
   // --- DIRECT CALL (From Recent/Online) ---
-  // Updated to accept profile for optimistic UI
   const callPeer = useCallback((targetPeerId: string, targetProfile?: UserProfile) => {
     cleanup();
     setMessages([]);
     setError(null);
     setStatus(ChatMode.SEARCHING); 
+    setIncomingFriendRequest(null);
     
     // Optimistic UI update
     if (targetProfile) {
       setPartnerProfile(targetProfile);
-      // Save to recent immediately when we try to connect
       saveToRecent(targetProfile, targetPeerId);
     }
 
@@ -483,8 +524,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       console.error("Direct Call Error:", err);
       if (err.type === 'peer-unavailable') {
         setError("User is offline. Waiting for them to reconnect...");
-        // Keep status as SEARCHING or Connected to allow 'offline chat' UI to persist
-        // Do NOT setStatus(DISCONNECTED) here to avoid closing the UI
       } else {
         setError("Connection failed.");
       }
@@ -493,12 +532,17 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [cleanup, setupConnection, saveToRecent]);
 
   const disconnect = useCallback(() => {
+    // If we have a partner profile, ensure it's saved to recent before disconnecting completely
+    if (partnerProfile && connRef.current?.peer) {
+      saveToRecent(partnerProfile, connRef.current.peer);
+    }
+
     if (connRef.current && connRef.current.open) {
       connRef.current.send({ type: 'disconnect' });
     }
     cleanup();
     setStatus(ChatMode.DISCONNECTED);
-  }, [cleanup]);
+  }, [cleanup, partnerProfile, saveToRecent]);
 
   useEffect(() => {
     return () => { cleanup(); };
@@ -515,6 +559,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     onlineUsers,
     myPeerId,
     error,
+    friends,
+    incomingFriendRequest,
     sendMessage, 
     sendImage,
     sendAudio,
@@ -524,6 +570,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     sendRecording,
     updateMyProfile,
     sendVanishMode,
+    sendFriendRequest,
+    acceptFriendRequest,
     connect,
     callPeer,
     disconnect 

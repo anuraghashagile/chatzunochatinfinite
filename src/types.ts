@@ -40,7 +40,7 @@ export interface Message {
 }
 
 export interface PeerData {
-  type: 'message' | 'typing' | 'recording' | 'disconnect' | 'profile' | 'profile_update' | 'vanish_mode' | 'reaction' | 'edit_message';
+  type: 'message' | 'typing' | 'recording' | 'disconnect' | 'profile' | 'profile_update' | 'vanish_mode' | 'reaction' | 'edit_message' | 'friend_request' | 'friend_accept';
   payload?: any;
   dataType?: MessageType;
   messageId?: string; // For targeting specific messages (reactions/edits)
@@ -59,6 +59,17 @@ export interface RecentPeer {
   peerId: string; // The last known session ID
   profile: UserProfile;
   metAt: number;
+}
+
+export interface Friend {
+  id: string; // unique ID or peer ID used when adding
+  profile: UserProfile;
+  addedAt: number;
+}
+
+export interface FriendRequest {
+  peerId: string;
+  profile: UserProfile;
 }
 
 export interface AppSettings {

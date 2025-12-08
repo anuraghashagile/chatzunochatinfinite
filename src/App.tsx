@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Loader2, RefreshCw, EyeOff, Shield, Image as ImageIcon, Mic, X, Square, AlertTriangle } from 'lucide-react';
+import { Send, Loader2, RefreshCw, EyeOff, Shield, Image as ImageIcon, Mic, X, Square, AlertTriangle, UserPlus, Check } from 'lucide-react';
 import { supabase, saveMessageToHistory, fetchChatHistory } from './lib/supabase';
 import { Message, ChatMode, UserProfile, AppSettings, SessionType } from './types';
 import { useHumanChat } from './hooks/useHumanChat';
@@ -70,7 +69,9 @@ export default function App() {
     remoteVanishMode,
     onlineUsers, 
     myPeerId, 
-    error, 
+    error,
+    friends,
+    incomingFriendRequest, 
     sendMessage, 
     sendImage, 
     sendAudio,
@@ -80,6 +81,8 @@ export default function App() {
     sendRecording,
     updateMyProfile,
     sendVanishMode,
+    sendFriendRequest,
+    acceptFriendRequest,
     connect, 
     callPeer, 
     disconnect 
@@ -313,13 +316,21 @@ export default function App() {
       return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
     }
 
-    // 2. Direct Chat Mode - IMPORTANT: Don't show Landing Page background, 
-    // keep it clean or show random mode if it was active.
-    // However, if we are in Direct mode, we generally want the 'random chat' UI to be hidden 
-    // or just show a neutral "Lobby" state if no random chat is active.
+    // 2. Direct Chat Mode - Show a nice static wallpaper/background instead of Landing Page
     if (sessionType === 'direct') {
-       // Just show the Landing Page BG to look clean behind the modal
-       return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
+       return (
+         <div className="h-full w-full flex items-center justify-center bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
+            {/* Simple Background Pattern */}
+            <div className="absolute inset-0 opacity-5 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+            <div className="text-center p-6 opacity-40">
+               <div className="w-20 h-20 bg-slate-200 dark:bg-slate-800 rounded-full mx-auto mb-4 flex items-center justify-center text-slate-400">
+                  <UserPlus size={40} />
+               </div>
+               <h2 className="text-xl font-bold text-slate-900 dark:text-white">Social Hub Active</h2>
+               <p className="text-slate-500">You are chatting in the hub.</p>
+            </div>
+         </div>
+       );
     }
 
     // 3. Waiting / Connecting Screen (Random Mode)
@@ -443,7 +454,42 @@ export default function App() {
           partnerProfile={sessionType === 'random' ? partnerProfile : null} 
           onOpenSettings={() => setShowSettingsModal(true)}
           onEditProfile={() => setShowEditProfileModal(true)}
+          onAddFriend={sendFriendRequest}
         />
+      )}
+
+      {/* Friend Request Toast */}
+      {incomingFriendRequest && (
+        <div className="fixed top-20 right-4 sm:right-6 z-[60] animate-in slide-in-from-right-10 fade-in duration-300">
+          <div className="bg-white dark:bg-[#0A0A0F] border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl p-4 flex flex-col gap-3 w-72">
+             <div className="flex items-start gap-3">
+               <div className="w-10 h-10 rounded-full bg-brand-500 text-white flex items-center justify-center font-bold">
+                  {incomingFriendRequest.profile.username[0].toUpperCase()}
+               </div>
+               <div>
+                 <h4 className="text-sm font-bold text-slate-900 dark:text-white">Friend Request</h4>
+                 <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {incomingFriendRequest.profile.username} wants to connect!
+                 </p>
+               </div>
+             </div>
+             <div className="flex gap-2">
+               <Button 
+                 onClick={acceptFriendRequest} 
+                 className="flex-1 py-1.5 text-xs h-8"
+               >
+                 Accept
+               </Button>
+               <Button 
+                 variant="secondary" 
+                 onClick={() => {/* dismiss handled by useHumanChat or we could expose dismiss function */}} 
+                 className="flex-1 py-1.5 text-xs h-8"
+               >
+                 Ignore
+               </Button>
+             </div>
+          </div>
+        </div>
       )}
 
       {/* Error Toast */}
