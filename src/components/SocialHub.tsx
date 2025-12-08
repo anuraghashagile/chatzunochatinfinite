@@ -50,6 +50,10 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   const [recentPeers, setRecentPeers] = useState<RecentPeer[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
   
+  // Notification State
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [globalUnread, setGlobalUnread] = useState(false);
+  
   // Inputs
   const [globalInput, setGlobalInput] = useState('');
   const [privateInput, setPrivateInput] = useState('');
@@ -64,19 +68,17 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
   // --- 1. LOAD DATA ---
   useEffect(() => {
-    if (isOpen) {
-      // Load Recent
-      const storedRecents = localStorage.getItem('recent_peers');
-      if (storedRecents) {
-        try { setRecentPeers(JSON.parse(storedRecents)); } catch (e) {}
-      }
-      // Load Friends
-      const storedFriends = localStorage.getItem('chat_friends');
-      if (storedFriends) {
-        try { setFriends(JSON.parse(storedFriends)); } catch (e) {}
-      }
+    // Load Recent
+    const storedRecents = localStorage.getItem('recent_peers');
+    if (storedRecents) {
+      try { setRecentPeers(JSON.parse(storedRecents)); } catch (e) {}
     }
-  }, [isOpen, chatStatus]);
+    // Load Friends
+    const storedFriends = localStorage.getItem('chat_friends');
+    if (storedFriends) {
+      try { setFriends(JSON.parse(storedFriends)); } catch (e) {}
+    }
+  }, [isOpen, chatStatus, incomingDirectMessage]); // Reload when message arrives to update Recents order
 
   // --- 2. LOAD CHAT HISTORY WHEN CLICKING A USER ---
   useEffect(() => {
@@ -92,10 +94,17 @@ export const SocialHub: React.FC<SocialHubProps> = ({
       } else {
         setLocalChatHistory([]);
       }
+      
+      // Clear unread for this peer
+      setUnreadCounts(prev => {
+        const next = { ...prev };
+        delete next[activePeer.id];
+        return next;
+      });
     }
   }, [activePeer]);
 
-  // --- 3. HANDLE INCOMING DIRECT MESSAGES ---
+  // --- 3. HANDLE INCOMING DIRECT MESSAGES & NOTIFICATIONS ---
   useEffect(() => {
     if (incomingDirectMessage) {
       const { peerId, message } = incomingDirectMessage;
@@ -113,6 +122,12 @@ export const SocialHub: React.FC<SocialHubProps> = ({
         // If this peer is active in the view, update the view state
         if (activePeer && activePeer.id === peerId) {
           setLocalChatHistory(history);
+        } else {
+          // Increment unread count
+          setUnreadCounts(prev => ({
+            ...prev,
+            [peerId]: (prev[peerId] || 0) + 1
+          }));
         }
       }
     }
@@ -222,6 +237,13 @@ export const SocialHub: React.FC<SocialHubProps> = ({
       setActivePeer({ id: peerId, profile });
       // Initiate direct connection without breaking main chat
       onCallPeer(peerId, profile);
+      
+      // Clear notification for this peer
+      setUnreadCounts(prev => {
+        const next = { ...prev };
+        delete next[peerId];
+        return next;
+      });
     }
   };
 
@@ -230,14 +252,21 @@ export const SocialHub: React.FC<SocialHubProps> = ({
     if (onCloseDirectChat) onCloseDirectChat();
   };
 
+  const getTotalUnreadCount = () => Object.values(unreadCounts).reduce((a, b) => a + b, 0);
+
   return (
     <>
       {/* FAB Trigger */}
       <button 
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-36 right-4 sm:bottom-6 sm:right-6 z-40 bg-brand-500 hover:bg-brand-600 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-4 border-slate-50 dark:border-slate-900"
+        className="fixed bottom-36 right-4 sm:bottom-6 sm:right-6 z-40 bg-brand-500 hover:bg-brand-600 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-4 border-slate-50 dark:border-slate-900 relative"
       >
         <MessageCircle size={28} />
+        {getTotalUnreadCount() > 0 && (
+          <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center text-[10px] font-bold animate-pulse">
+            {getTotalUnreadCount() > 9 ? '9+' : getTotalUnreadCount()}
+          </span>
+        )}
       </button>
 
       {/* Drawer Overlay */}
@@ -295,7 +324,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                         key={tab}
                         onClick={() => setActiveTab(tab as any)}
                         className={clsx(
-                          "flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 capitalize whitespace-nowrap",
+                          "flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 capitalize whitespace-nowrap relative",
                           activeTab === tab ? "bg-white dark:bg-slate-800 text-brand-500 shadow-sm" : "text-slate-500"
                         )}
                       >
@@ -304,6 +333,14 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                          {tab === 'recent' && <History size={14} />}
                          {tab === 'global' && <Globe size={14} />}
                          {tab}
+                         
+                         {/* Tab specific dots could be added here based on logic */}
+                         {tab === 'friends' && friends.some(f => unreadCounts[f.id] > 0) && (
+                            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+                         )}
+                         {tab === 'recent' && recentPeers.some(p => unreadCounts[p.peerId] > 0) && (
+                            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+                         )}
                       </button>
                    ))}
                 </div>
@@ -330,8 +367,11 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                         >
                           <div className="flex items-start justify-between">
                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-400 to-violet-500 flex items-center justify-center text-white font-bold shrink-0 shadow-lg">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-400 to-violet-500 flex items-center justify-center text-white font-bold shrink-0 shadow-lg relative">
                                   {user.profile?.username?.[0]?.toUpperCase() || '?'}
+                                  {unreadCounts[user.peerId] > 0 && (
+                                     <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border border-white dark:border-slate-900" />
+                                  )}
                                 </div>
                                 <div>
                                   <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -361,8 +401,11 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                            className="flex items-center justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-white/5 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors group"
                          >
                            <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white font-bold shrink-0">
+                             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center text-white font-bold shrink-0 relative">
                                {friend.profile.username[0].toUpperCase()}
+                               {unreadCounts[friend.id] > 0 && (
+                                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border border-white dark:border-slate-900" />
+                               )}
                              </div>
                              <div className="min-w-0">
                                <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
@@ -401,8 +444,11 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                           className="flex items-center justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-white/5 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors group"
                         >
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 text-lg font-bold shrink-0">
+                            <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 text-lg font-bold shrink-0 relative">
                               {peer.profile.username[0].toUpperCase()}
+                              {unreadCounts[peer.peerId] > 0 && (
+                                 <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border border-white dark:border-slate-900" />
+                              )}
                             </div>
                             <div className="min-w-0">
                               <div className="text-sm font-bold text-slate-900 dark:text-white truncate">

@@ -212,10 +212,8 @@ export default function App() {
 
   // Wrapper for Direct Calls from Social Hub
   const handleDirectCall = (peerId: string, profile?: UserProfile) => {
-    // We set sessionType to direct to allow specific UI handling if needed,
-    // but we do NOT disconnect the main chat anymore.
-    // The Social Hub will handle the view.
-    setSessionType('direct'); 
+    // Just initiate the connection logic. 
+    // We DO NOT change the main view or disconnect the main chat.
     callPeer(peerId, profile);
   };
 
@@ -318,34 +316,13 @@ export default function App() {
 
   // --- VIEW RENDERING LOGIC ---
   const renderMainContent = () => {
-    // 1. Direct Session Mode (Social Hub View Priority)
-    // Even if connected to stranger, if user explicitly entered "Direct Mode" (e.g. via Social Hub interaction that set sessionType),
-    // we might want to show wallpaper.
-    // However, user requested "simultaneous".
-    // So "Direct" mode inside Social Hub should be handled by the SocialHub component itself (overlay).
-    // The main background should reflect the Main Chat state (Connected, Searching, etc).
-    // BUT if the user wants "Chat A... Chat B... separate", we should probably reset sessionType to 'random' if they close Social Hub.
-    
-    if (sessionType === 'direct') {
-       return (
-         <div className="h-full w-full flex items-center justify-center relative overflow-hidden">
-            <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
-            <div className="text-center p-8 opacity-40">
-               <div className="w-24 h-24 bg-slate-200 dark:bg-white/5 rounded-full mx-auto mb-4 flex items-center justify-center">
-                  <Shield size={40} />
-               </div>
-               <h3 className="text-xl font-bold mb-2">Social Hub Active</h3>
-            </div>
-         </div>
-       );
-    }
-
-    // 2. Landing Page (Only if IDLE and no profile)
+    // 1. Landing Page (Only if IDLE and no profile)
     if (status === ChatMode.IDLE && !userProfile) {
       return <LandingPage onlineCount={onlineUsers.length} onStart={handleStartClick} />;
     }
 
-    // 3. Waiting / Connecting Screen (Random Mode)
+    // 2. Waiting / Connecting Screen (Random Mode)
+    // Only show this if we are actively searching in Main Mode
     if (status === ChatMode.SEARCHING || status === ChatMode.WAITING) {
       return (
         <div className="h-full flex flex-col items-center justify-center p-6 text-center">
@@ -366,7 +343,7 @@ export default function App() {
       );
     }
 
-    // 4. Active Chat Screen (Random Mode Only)
+    // 3. Active Chat Screen (Random Mode) - Or Empty Idle State
     return (
       <div className="flex-1 flex flex-col h-full relative">
          {/* Messages Area */}
