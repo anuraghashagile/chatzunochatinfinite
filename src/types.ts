@@ -9,6 +9,8 @@ export enum ChatMode {
   ERROR = 'ERROR'
 }
 
+export type SessionType = 'random' | 'direct';
+
 export interface UserProfile {
   username: string;
   age: string;

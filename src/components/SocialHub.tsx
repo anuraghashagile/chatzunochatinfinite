@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle, Loader2 } from 'lucide-react';
-import { UserProfile, PresenceState, RecentPeer, Message, ChatMode } from '../types';
+import { UserProfile, PresenceState, RecentPeer, Message, ChatMode, SessionType } from '../types';
 import { clsx } from 'clsx';
 import { MessageBubble } from './MessageBubble';
 
@@ -18,6 +18,7 @@ interface SocialHubProps {
   chatStatus: ChatMode;
   error?: string | null;
   onEditMessage?: (id: string, text: string) => void;
+  sessionType: SessionType;
 }
 
 export const SocialHub: React.FC<SocialHubProps> = ({ 
@@ -33,7 +34,8 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   currentPartner,
   chatStatus,
   error,
-  onEditMessage
+  onEditMessage,
+  sessionType
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global'>('online');
@@ -75,6 +77,20 @@ export const SocialHub: React.FC<SocialHubProps> = ({
     }
   }, [privateMessages, viewMode, isOpen]);
 
+  // Sync internal ViewMode with External SessionType
+  // If we are in 'random' session, force list mode. 
+  // If we are in 'direct' session, force chat mode (if hub is open).
+  useEffect(() => {
+    if (sessionType === 'direct') {
+       setViewMode('chat');
+       // Auto-open hub if a direct session starts
+       setIsOpen(true);
+    } else {
+       // If random, we default to list, unless user is manually navigating
+       setViewMode('list');
+    }
+  }, [sessionType]);
+
   const handleGlobalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (globalInput.trim()) {
@@ -92,9 +108,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   };
 
   const handleUserClick = (peerId: string, profile?: UserProfile) => {
-    // 1. Switch view immediately (Optimistic UI)
-    setViewMode('chat');
-    // 2. Initiate Call
+    // Initiate Call (Parent will set sessionType to 'direct')
     onCallPeer(peerId, profile);
   };
 
@@ -117,7 +131,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
             {/* Header */}
             <div className="p-4 border-b border-slate-100 dark:border-white/5 flex items-center justify-between bg-slate-50/50 dark:bg-white/5 shrink-0">
               
-              {viewMode === 'chat' ? (
+              {viewMode === 'chat' && sessionType === 'direct' ? (
                 <div className="flex items-center gap-3">
                    <button onClick={() => setViewMode('list')} className="p-2 -ml-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full">
                      <ArrowLeft size={20} className="text-slate-500 dark:text-slate-200" />
@@ -151,7 +165,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
             </div>
 
             {/* --- LIST MODE CONTENT --- */}
-            {viewMode === 'list' && (
+            {(viewMode === 'list' || sessionType === 'random') && (
               <>
                 {/* Tabs */}
                 <div className="flex p-1 bg-slate-100 dark:bg-slate-900 mx-4 mt-4 rounded-xl shrink-0">
@@ -196,7 +210,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                         <div 
                           key={i} 
                           onClick={() => {
-                            // ALLOW CLICKING EVERYONE EXCEPT SELF
                             if (user.peerId !== myPeerId) {
                               handleUserClick(user.peerId, user.profile);
                             }
@@ -329,8 +342,8 @@ export const SocialHub: React.FC<SocialHubProps> = ({
               </>
             )}
 
-            {/* --- PRIVATE CHAT MODE CONTENT (IN-HUB) --- */}
-            {viewMode === 'chat' && (
+            {/* --- PRIVATE CHAT MODE CONTENT (IN-HUB, ONLY FOR DIRECT SESSIONS) --- */}
+            {viewMode === 'chat' && sessionType === 'direct' && (
                <div className="flex-1 flex flex-col p-4 overflow-hidden min-h-0 relative">
                   
                   {/* Inline Error/Status Banner - Non-blocking */}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Loader2, RefreshCw, EyeOff, Shield, Image as ImageIcon, Mic, X, Square, AlertTriangle } from 'lucide-react';
 import { supabase, saveMessageToHistory, fetchChatHistory } from './lib/supabase';
-import { Message, ChatMode, UserProfile, AppSettings } from './types';
+import { Message, ChatMode, UserProfile, AppSettings, SessionType } from './types';
 import { useHumanChat } from './hooks/useHumanChat';
 import { useGlobalChat } from './hooks/useGlobalChat';
 import { MessageBubble } from './components/MessageBubble';
@@ -12,6 +12,7 @@ import { JoinModal } from './components/JoinModal';
 import { SettingsModal } from './components/SettingsModal';
 import { SocialHub } from './components/SocialHub';
 import { EditMessageModal } from './components/EditMessageModal';
+import Loader from './components/Loader';
 import { NOTIFICATION_SOUND } from './constants';
 import { clsx } from 'clsx';
 
@@ -40,6 +41,9 @@ export default function App() {
     textSize: 'medium',
     vanishMode: false
   });
+
+  // Session State (Random vs Direct)
+  const [sessionType, setSessionType] = useState<SessionType>('random');
 
   // Edit State
   const [editingMessage, setEditingMessage] = useState<{id: string, text: string} | null>(null);
@@ -170,8 +174,10 @@ export default function App() {
 
   // Auto-scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, partnerTyping]);
+    if (sessionType === 'random') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, partnerTyping, sessionType]);
 
   const handleStartClick = () => setShowJoinModal(true);
 
@@ -179,6 +185,7 @@ export default function App() {
     localStorage.setItem('chat_user_profile', JSON.stringify(profile));
     setUserProfile(profile);
     setShowJoinModal(false);
+    setSessionType('random'); // Explicitly set Random session
     connect();
   };
 
@@ -194,6 +201,12 @@ export default function App() {
     if (newSettings.vanishMode !== settings.vanishMode) {
       sendVanishMode(newSettings.vanishMode);
     }
+  };
+
+  // Wrapper for Direct Calls from Social Hub
+  const handleDirectCall = (peerId: string, profile?: UserProfile) => {
+    setSessionType('direct'); // Switch to Direct session mode
+    callPeer(peerId, profile);
   };
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -226,6 +239,7 @@ export default function App() {
   };
 
   const handleNewChat = () => {
+    setSessionType('random'); // Ensure we go back to random mode
     disconnect(); 
     setTimeout(connect, 200);
   };
@@ -249,18 +263,6 @@ export default function App() {
       reader.onloadend = () => {
         const base64 = reader.result as string;
         sendImage(base64);
-        if (settings.vanishMode) {
-           setTimeout(() => {
-             setMessages(prev => {
-                const updated = [...prev];
-                const lastIdx = updated.length - 1;
-                if (lastIdx >= 0 && updated[lastIdx].sender === 'me') {
-                  updated[lastIdx] = { ...updated[lastIdx], isVanish: true };
-                }
-                return updated;
-             });
-           }, 50);
-        }
       };
       reader.readAsDataURL(file);
     }
@@ -283,18 +285,6 @@ export default function App() {
         reader.onloadend = () => {
            const base64Audio = reader.result as string;
            sendAudio(base64Audio);
-           if (settings.vanishMode) {
-             setTimeout(() => {
-               setMessages(prev => {
-                  const updated = [...prev];
-                  const lastIdx = updated.length - 1;
-                  if (lastIdx >= 0 && updated[lastIdx].sender === 'me') {
-                    updated[lastIdx] = { ...updated[lastIdx], isVanish: true };
-                  }
-                  return updated;
-               });
-             }, 50);
-           }
         };
         stream.getTracks().forEach(track => track.stop());
       };
@@ -322,15 +312,35 @@ export default function App() {
       return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
     }
 
-    // 2. Waiting / Connecting Screen
+    // 2. Direct Chat Mode (Main screen should show lobby background, NOT the chat)
+    if (sessionType === 'direct') {
+      return (
+        <div className="h-full flex flex-col items-center justify-center p-6 text-center">
+             <div className="bg-white/5 p-8 rounded-3xl backdrop-blur-sm border border-white/10 max-w-md w-full animate-in fade-in zoom-in-95">
+                <div className="w-16 h-16 bg-brand-500/20 text-brand-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <RefreshCw size={32} className="animate-spin-slow" />
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Social Hub Active</h2>
+                <p className="text-slate-500 dark:text-slate-400">
+                  You are currently chatting in the Social Hub. 
+                </p>
+                <div className="mt-6 flex justify-center">
+                   <Button variant="secondary" onClick={handleNewChat}>
+                      Start Random Chat
+                   </Button>
+                </div>
+             </div>
+        </div>
+      );
+    }
+
+    // 3. Waiting / Connecting Screen (Random Mode)
     if (status === ChatMode.SEARCHING || status === ChatMode.WAITING) {
       return (
         <div className="h-full flex flex-col items-center justify-center p-6 text-center">
           <div className="relative mb-8">
-            <div className="absolute inset-0 bg-brand-500 blur-2xl opacity-20 animate-pulse"></div>
-            <div className="relative z-10 p-6 bg-slate-50 dark:bg-slate-900 rounded-full shadow-2xl border border-slate-200 dark:border-slate-800">
-               <Loader2 className="w-12 h-12 text-brand-500 animate-spin" />
-            </div>
+            {/* New Infinity Loader */}
+            <Loader />
           </div>
           <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-3">Matching you...</h2>
           <p className="text-slate-500 dark:text-slate-400 max-w-xs mx-auto animate-pulse mb-8">
@@ -346,7 +356,7 @@ export default function App() {
       );
     }
 
-    // 3. Active Chat Screen
+    // 4. Active Chat Screen (Random Mode Only)
     return (
       <div className="flex-1 flex flex-col h-full relative">
          {/* Messages Area */}
@@ -443,7 +453,7 @@ export default function App() {
           theme={theme}
           toggleTheme={toggleTheme}
           onDisconnect={() => disconnect()}
-          partnerProfile={partnerProfile}
+          partnerProfile={sessionType === 'random' ? partnerProfile : null} // Hide partner profile in header if Direct Mode (it shows in hub)
           onOpenSettings={() => setShowSettingsModal(true)}
           onEditProfile={() => setShowEditProfileModal(true)}
         />
@@ -496,7 +506,7 @@ export default function App() {
       {userProfile && (
         <SocialHub 
           onlineUsers={onlineUsers} 
-          onCallPeer={callPeer}
+          onCallPeer={handleDirectCall} // Use wrapper that sets sessionType
           globalMessages={globalMessages}
           sendGlobalMessage={sendGlobalMessage}
           myProfile={userProfile}
@@ -508,6 +518,7 @@ export default function App() {
           chatStatus={status}
           error={error}
           onEditMessage={initiateEdit}
+          sessionType={sessionType}
         />
       )}
     </div>
