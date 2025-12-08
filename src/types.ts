@@ -1,4 +1,5 @@
 
+
 export enum ChatMode {
   IDLE = 'IDLE',
   SEARCHING = 'SEARCHING',
@@ -18,6 +19,11 @@ export interface UserProfile {
 
 export type MessageType = 'text' | 'image' | 'audio';
 
+export interface Reaction {
+  emoji: string;
+  sender: 'me' | 'stranger';
+}
+
 export interface Message {
   id: string;
   text?: string;
@@ -27,12 +33,14 @@ export interface Message {
   senderName?: string; // Added for Global Chat identification
   timestamp: number;
   isVanish?: boolean;
+  reactions?: Reaction[]; // Added for reactions
 }
 
 export interface PeerData {
-  type: 'message' | 'typing' | 'recording' | 'disconnect' | 'profile' | 'profile_update' | 'vanish_mode';
+  type: 'message' | 'typing' | 'recording' | 'disconnect' | 'profile' | 'profile_update' | 'vanish_mode' | 'reaction';
   payload?: any;
   dataType?: MessageType;
+  messageId?: string; // For targeting specific messages (reactions)
 }
 
 // Presence state for the lobby

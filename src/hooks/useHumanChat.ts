@@ -1,4 +1,5 @@
 
+
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { supabase } from '../lib/supabase';
@@ -22,6 +23,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const [partnerProfile, setPartnerProfile] = useState<UserProfile | null>(null);
   const [remoteVanishMode, setRemoteVanishMode] = useState<boolean | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<PresenceState[]>([]);
+  const [myPeerId, setMyPeerId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   
   const peerRef = useRef<Peer | null>(null);
   const connRef = useRef<DataConnection | null>(null);
@@ -72,9 +75,11 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     }
     
     myPeerIdRef.current = null;
+    setMyPeerId(null);
     isMatchmakerRef.current = false;
     setPartnerTyping(false);
     setPartnerRecording(false);
+    // Don't clear error here, let it persist briefly if needed
   }, []);
 
   // --- MESSAGING ---
@@ -88,7 +93,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         text,
         type: 'text',
         sender: 'me',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        reactions: []
       }]);
     }
   }, [status]);
@@ -103,7 +109,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         fileData: base64Image,
         type: 'image',
         sender: 'me',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        reactions: []
       }]);
     }
   }, [status]);
@@ -118,8 +125,32 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         fileData: base64Audio,
         type: 'audio',
         sender: 'me',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        reactions: []
       }]);
+    }
+  }, [status]);
+
+  const sendReaction = useCallback((messageId: string, emoji: string) => {
+    // Update local state immediately
+    setMessages(prev => prev.map(msg => {
+      if (msg.id === messageId) {
+        return {
+          ...msg,
+          reactions: [...(msg.reactions || []), { emoji, sender: 'me' }]
+        };
+      }
+      return msg;
+    }));
+
+    // Send to peer
+    if (connRef.current && status === ChatMode.CONNECTED) {
+      const payload: PeerData = { 
+        type: 'reaction', 
+        payload: emoji, 
+        messageId: messageId 
+      };
+      connRef.current.send(payload);
     }
   }, [status]);
 
@@ -167,10 +198,11 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       setPartnerRecording(false);
       
       const newMessage: Message = {
-        id: Date.now().toString(),
+        id: Date.now().toString(), // Note: In a real app, use UUID provided by sender to match IDs for reactions
         sender: 'stranger',
         timestamp: Date.now(),
-        type: data.dataType || 'text'
+        type: data.dataType || 'text',
+        reactions: []
       };
 
       if (data.dataType === 'image' || data.dataType === 'audio') {
@@ -180,6 +212,21 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       }
 
       setMessages(prev => [...prev, newMessage]);
+
+    } else if (data.type === 'reaction') {
+       // We received a reaction. 
+       setMessages(prev => {
+         const newMessages = [...prev];
+         const lastMessageIndex = newMessages.map(m => m.sender).lastIndexOf('me');
+         if (lastMessageIndex !== -1) {
+            const msg = newMessages[lastMessageIndex];
+            newMessages[lastMessageIndex] = {
+               ...msg,
+               reactions: [...(msg.reactions || []), { emoji: data.payload, sender: 'stranger' }]
+            };
+         }
+         return newMessages;
+       });
 
     } else if (data.type === 'typing') {
       setPartnerTyping(data.payload);
@@ -194,6 +241,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     } else if (data.type === 'profile_update') {
       setPartnerProfile(data.payload);
     } else if (data.type === 'vanish_mode') {
+      // Robust sync: Update remote mode state immediately
       setRemoteVanishMode(data.payload);
     } else if (data.type === 'disconnect') {
       setStatus(ChatMode.DISCONNECTED);
@@ -219,6 +267,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     (conn as any).on('open', () => {
       setStatus(ChatMode.CONNECTED);
       setMessages([INITIAL_GREETING]);
+      setError(null);
       if (userProfile) {
         conn.send({ type: 'profile', payload: userProfile });
       }
@@ -234,15 +283,23 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       cleanup();
     });
     
-    (conn as any).on('error', () => {
-      cleanup();
-      setStatus(ChatMode.DISCONNECTED);
+    (conn as any).on('error', (err: any) => {
+      console.error("Connection Error:", err);
+      // Don't immediately cleanup on minor errors, but notify
+      if (err.type === 'network') {
+        setError("Network connection unstable.");
+      } else {
+        setError("Connection lost.");
+        cleanup();
+        setStatus(ChatMode.DISCONNECTED);
+      }
     });
   }, [handleData, cleanup, status, userProfile]);
 
   // --- MATCHMAKING LOGIC ---
   const joinLobby = useCallback((myId: string) => {
     setStatus(ChatMode.SEARCHING);
+    setError(null);
     
     const channel = supabase.channel(MATCHMAKING_CHANNEL, {
       config: { presence: { key: myId } }
@@ -294,15 +351,17 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     setMessages([]);
     setPartnerProfile(null);
     setRemoteVanishMode(null);
+    setError(null);
     
     const peer = new Peer({
-      debug: 0,
+      debug: 1, // Reduced debug level
       config: { iceServers: ICE_SERVERS }
     });
     peerRef.current = peer;
 
     (peer as any).on('open', (id: string) => {
       myPeerIdRef.current = id;
+      setMyPeerId(id);
       joinLobby(id);
     });
 
@@ -311,11 +370,56 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       setupConnection(conn);
     });
 
+    // --- Robust Error Handling ---
     (peer as any).on('error', (err: any) => {
-      console.error("Peer Error:", err);
-      if (status !== ChatMode.CONNECTED) {
-         setStatus(ChatMode.ERROR);
+      console.error("Peer Error:", err.type, err);
+      
+      switch (err.type) {
+        case 'peer-unavailable':
+          setError("User unavailable or currently offline.");
+          // If we were trying to call someone specific, this lets us know. 
+          // If we were waiting in lobby, we just stay waiting/searching.
+          if (status === ChatMode.SEARCHING) {
+             // Stay searching if in lobby
+          } else {
+             setStatus(ChatMode.DISCONNECTED);
+          }
+          break;
+
+        case 'disconnected':
+          setError("Lost connection to signaling server. Reconnecting...");
+          // Automatic reconnection attempt
+          if (!peer.destroyed) {
+            peer.reconnect();
+          }
+          break;
+
+        case 'network':
+          setError("Network error. Checking internet connection...");
+          break;
+
+        case 'webrtc':
+          setError("WebRTC connection failed.");
+          setStatus(ChatMode.ERROR);
+          cleanup();
+          break;
+
+        case 'browser-incompatible':
+          setError("Your browser does not support WebRTC.");
+          setStatus(ChatMode.ERROR);
+          break;
+
+        default:
+          setError(`Connection error: ${err.type || 'Unknown'}`);
+          if (status !== ChatMode.IDLE) {
+            // Only disconnect if we were active
+            cleanup();
+            setStatus(ChatMode.ERROR);
+          }
       }
+      
+      // Clear transient error messages after 5 seconds
+      setTimeout(() => setError(null), 5000);
     });
 
   }, [cleanup, joinLobby, setupConnection, status]);
@@ -325,29 +429,31 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     cleanup();
     setMessages([]);
     setPartnerProfile(null);
+    setError(null);
     setStatus(ChatMode.SEARCHING); 
 
     const peer = new Peer({
-      debug: 0,
+      debug: 1,
       config: { iceServers: ICE_SERVERS }
     });
     peerRef.current = peer;
 
     (peer as any).on('open', (myId: string) => {
        myPeerIdRef.current = myId;
+       setMyPeerId(myId);
        // Directly connect instead of joining lobby
        const conn = peer.connect(targetPeerId, { reliable: true });
        if (conn) {
          setupConnection(conn);
        } else {
-         alert("Could not create connection.");
+         setError("Could not initiate connection.");
          setStatus(ChatMode.IDLE);
        }
     });
 
     (peer as any).on('error', (err: any) => {
       console.error("Direct Call Error:", err);
-      alert("User is likely offline or has a new session ID.");
+      setError("Failed to connect to user. They may be offline.");
       setStatus(ChatMode.DISCONNECTED);
     });
 
@@ -366,22 +472,26 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [cleanup]);
 
   return { 
-    messages, 
+    messages,
+    setMessages,
     status, 
     partnerTyping,
     partnerRecording,
     partnerProfile,
     remoteVanishMode,
-    onlineUsers, // Exporting for Social Hub
+    onlineUsers,
+    myPeerId,
+    error,
     sendMessage, 
     sendImage,
     sendAudio,
+    sendReaction,
     sendTyping,
     sendRecording,
     updateMyProfile,
     sendVanishMode,
     connect,
-    callPeer, // Exporting for Social Hub
+    callPeer,
     disconnect 
   };
 };

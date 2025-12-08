@@ -1,6 +1,7 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Loader2, RefreshCw, EyeOff, Shield, Image as ImageIcon, Mic, X, Square } from 'lucide-react';
+import { Send, Loader2, RefreshCw, EyeOff, Shield, Image as ImageIcon, Mic, X, Square, AlertTriangle } from 'lucide-react';
 import { supabase, saveMessageToHistory, fetchChatHistory } from './lib/supabase';
 import { Message, ChatMode, UserProfile, AppSettings } from './types';
 import { useHumanChat } from './hooks/useHumanChat';
@@ -53,16 +54,20 @@ export default function App() {
 
   // Initialize Chat Hooks
   const { 
-    messages, 
+    messages,
+    setMessages, // Exposed to handle message deletion
     status, 
     partnerTyping, 
     partnerRecording,
     partnerProfile,
     remoteVanishMode,
     onlineUsers, // Get online list
+    myPeerId, // Get my peer ID
+    error, // New error state
     sendMessage, 
     sendImage, 
     sendAudio,
+    sendReaction,
     sendTyping, 
     sendRecording,
     updateMyProfile,
@@ -106,6 +111,24 @@ export default function App() {
     }
   }, [remoteVanishMode]);
 
+  // --- AUTO-DELETE MESSAGES IN VANISH MODE ---
+  useEffect(() => {
+    // Timer to check for expired messages every second
+    const interval = setInterval(() => {
+      if (messages.some(m => m.isVanish)) {
+        const now = Date.now();
+        setMessages(prev => prev.filter(msg => {
+          if (!msg.isVanish) return true;
+          // Keep if younger than 10 seconds
+          return (now - msg.timestamp) < 10000;
+        }));
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [messages, setMessages]);
+
+
   // --- HISTORY LOADING ---
   useEffect(() => {
     const loadHistory = async () => {
@@ -117,10 +140,10 @@ export default function App() {
   // Save outgoing messages to history
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg && lastMsg.sender === 'me') {
+    if (lastMsg && lastMsg.sender === 'me' && !settings.vanishMode) {
        saveMessageToHistory(userId, lastMsg);
     }
-  }, [messages, userId]);
+  }, [messages, userId, settings.vanishMode]);
 
   // Theme management
   useEffect(() => {
@@ -162,7 +185,22 @@ export default function App() {
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
+    
     sendMessage(inputText);
+    
+    // Manually add isVanish flag for local rendering if enabled (sender side)
+    if (settings.vanishMode) {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.sender === 'me') {
+           const updated = [...prev];
+           updated[updated.length - 1] = { ...last, isVanish: true };
+           return updated;
+        }
+        return prev;
+      });
+    }
+
     sendTyping(false);
     setInputText('');
   };
@@ -187,6 +225,20 @@ export default function App() {
       reader.onloadend = () => {
         const base64 = reader.result as string;
         sendImage(base64);
+        
+        // Handle vanish flag for images locally
+        if (settings.vanishMode) {
+           setTimeout(() => {
+             setMessages(prev => {
+                const updated = [...prev];
+                const lastIdx = updated.length - 1;
+                if (lastIdx >= 0 && updated[lastIdx].sender === 'me') {
+                  updated[lastIdx] = { ...updated[lastIdx], isVanish: true };
+                }
+                return updated;
+             });
+           }, 50);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -214,6 +266,20 @@ export default function App() {
         reader.onloadend = () => {
            const base64Audio = reader.result as string;
            sendAudio(base64Audio);
+           
+           // Handle vanish flag for audio locally
+           if (settings.vanishMode) {
+             setTimeout(() => {
+               setMessages(prev => {
+                  const updated = [...prev];
+                  const lastIdx = updated.length - 1;
+                  if (lastIdx >= 0 && updated[lastIdx].sender === 'me') {
+                    updated[lastIdx] = { ...updated[lastIdx], isVanish: true };
+                  }
+                  return updated;
+               });
+             }, 50);
+           }
         };
         stream.getTracks().forEach(track => track.stop());
       };
@@ -253,10 +319,20 @@ export default function App() {
   // --- 2. CONNECTING SCREEN ---
   if (status === ChatMode.SEARCHING || status === ChatMode.WAITING) {
     return (
-      <div className="h-[100dvh] bg-white dark:bg-slate-950 flex flex-col transition-colors overflow-hidden">
+      <div className="h-[100dvh] bg-white dark:bg-slate-950 flex flex-col transition-colors overflow-hidden relative">
         <Header 
            onlineCount={onlineUsers.length} mode={status} theme={theme} toggleTheme={toggleTheme} onDisconnect={() => {}} partnerProfile={null} onOpenSettings={() => setShowSettingsModal(true)} onEditProfile={() => setShowEditProfileModal(true)}
         />
+        
+        {/* Error Toast */}
+        {error && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-5">
+             <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
+               <AlertTriangle size={16} /> {error}
+             </div>
+          </div>
+        )}
+
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <div className="relative mb-8">
             <div className="absolute inset-0 bg-brand-500 blur-2xl opacity-20 animate-pulse"></div>
@@ -284,6 +360,13 @@ export default function App() {
             globalMessages={globalMessages}
             sendGlobalMessage={sendGlobalMessage}
             myProfile={userProfile}
+            myPeerId={myPeerId}
+            // Pass private chat props
+            privateMessages={messages}
+            sendPrivateMessage={sendMessage}
+            sendReaction={sendReaction}
+            currentPartner={partnerProfile}
+            chatStatus={status}
           />
         )}
       </div>
@@ -299,6 +382,15 @@ export default function App() {
       
       {settings.vanishMode && (
         <div className="absolute inset-0 pointer-events-none z-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
+      )}
+
+      {/* Error Toast in Chat */}
+      {error && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-5">
+             <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
+               <AlertTriangle size={16} /> {error}
+             </div>
+          </div>
       )}
 
       {settings.vanishMode && (
@@ -328,7 +420,14 @@ export default function App() {
          )}
          
          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} senderName={partnerProfile?.username} textSize={settings.textSize} />
+            <div key={msg.id} className={clsx("transition-opacity duration-1000", msg.isVanish && "animate-pulse")}>
+               <MessageBubble 
+                  message={msg} 
+                  senderName={partnerProfile?.username} 
+                  textSize={settings.textSize}
+                  onReact={(emoji) => sendReaction(msg.id, emoji)}
+               />
+            </div>
          ))}
 
          {(status === ChatMode.DISCONNECTED || status === ChatMode.IDLE) && (
@@ -373,7 +472,7 @@ export default function App() {
                  type="text"
                  value={inputText}
                  onChange={handleTyping}
-                 placeholder={status === ChatMode.CONNECTED ? "Type a message..." : "Disconnected"}
+                 placeholder={status === ChatMode.CONNECTED ? (settings.vanishMode ? "Vanish message..." : "Type a message...") : "Disconnected"}
                  className="w-full bg-transparent border-0 px-4 py-3 placeholder:text-slate-400 focus:outline-none text-slate-900 dark:text-white"
                  autoComplete="off"
                />
@@ -399,6 +498,13 @@ export default function App() {
           globalMessages={globalMessages}
           sendGlobalMessage={sendGlobalMessage}
           myProfile={userProfile}
+          myPeerId={myPeerId}
+          // Pass private chat props
+          privateMessages={messages}
+          sendPrivateMessage={sendMessage}
+          sendReaction={sendReaction}
+          currentPartner={partnerProfile}
+          chatStatus={status}
         />
       )}
     </div>

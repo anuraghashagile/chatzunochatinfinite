@@ -49,10 +49,15 @@ export const Header: React.FC<HeaderProps> = ({
                 <h1 className="font-bold text-slate-900 dark:text-white truncate max-w-[150px] sm:max-w-xs leading-tight">
                   {partnerProfile.username}
                 </h1>
-                <span className="text-xs font-medium text-emerald-500 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                  Online
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-emerald-500 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    Online
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                     {partnerProfile.age} • {partnerProfile.gender}
+                  </span>
+                </div>
              </div>
           </div>
         ) : (
