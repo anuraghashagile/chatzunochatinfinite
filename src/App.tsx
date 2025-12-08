@@ -17,6 +17,7 @@ import { clsx } from 'clsx';
 
 // Simple user ID persistence
 const getStoredUserId = () => {
+  if (typeof window === 'undefined') return 'server_user';
   let id = localStorage.getItem('chat_user_id');
   if (!id) {
     id = 'user_' + Math.random().toString(36).substr(2, 9);
@@ -255,7 +256,6 @@ export default function App() {
       <div className="h-[100dvh] bg-white dark:bg-slate-950 flex flex-col transition-colors overflow-hidden">
         <Header 
            onlineCount={onlineUsers.length} mode={status} theme={theme} toggleTheme={toggleTheme} onDisconnect={() => {}} partnerProfile={null} onOpenSettings={() => setShowSettingsModal(true)} onEditProfile={() => setShowEditProfileModal(true)}
-           activeTab="personal" setActiveTab={() => {}}
         />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <div className="relative mb-8">
@@ -319,8 +319,6 @@ export default function App() {
         partnerProfile={partnerProfile}
         onOpenSettings={() => setShowSettingsModal(true)}
         onEditProfile={() => setShowEditProfileModal(true)}
-        activeTab="personal"
-        setActiveTab={() => {}}
       />
 
       {/* Messages Area */}

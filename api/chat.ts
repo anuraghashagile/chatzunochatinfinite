@@ -16,7 +16,7 @@ export default async function handler(request: Request) {
 
   try {
     const { messages } = await request.json() as ChatRequestBody;
-    const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+    const apiKey = process.env.API_KEY;
 
     if (!apiKey) {
       return new Response(JSON.stringify({ error: 'Server configuration error: API Key missing' }), {
@@ -53,6 +53,7 @@ export default async function handler(request: Request) {
         systemInstruction: systemInstruction,
         temperature: 0.9,
         maxOutputTokens: 150,
+        thinkingConfig: { thinkingBudget: 0 },
       }
     });
 

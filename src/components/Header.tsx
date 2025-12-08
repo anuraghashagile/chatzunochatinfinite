@@ -12,8 +12,6 @@ interface HeaderProps {
   partnerProfile: UserProfile | null;
   onOpenSettings: () => void;
   onEditProfile: () => void;
-  activeTab: string; // Kept for compatibility but unused
-  setActiveTab: (tab: any) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 

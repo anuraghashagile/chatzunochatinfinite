@@ -2,7 +2,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { Message, UserProfile } from '../types';
-import { RealtimeChannel } from '@supabase/supabase-js';
+
+// Define RealtimeChannel type from supabase instance
+type RealtimeChannel = ReturnType<typeof supabase.channel>;
 
 const GLOBAL_CHAT_CHANNEL = 'global-chat-room';
 

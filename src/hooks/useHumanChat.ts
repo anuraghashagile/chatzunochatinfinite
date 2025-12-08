@@ -2,13 +2,15 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { supabase } from '../lib/supabase';
-import { RealtimeChannel } from '@supabase/supabase-js';
 import { Message, ChatMode, PeerData, PresenceState, UserProfile, RecentPeer } from '../types';
 import { 
   INITIAL_GREETING, 
   STRANGER_DISCONNECTED_MSG, 
   ICE_SERVERS
 } from '../constants';
+
+// Define RealtimeChannel type from supabase instance return type since it's not exported from the module in some versions
+type RealtimeChannel = ReturnType<typeof supabase.channel>;
 
 const MATCHMAKING_CHANNEL = 'global-lobby-v1';
 
@@ -30,20 +32,24 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   // --- PERSIST RECENT PEERS ---
   const saveToRecent = useCallback((profile: UserProfile, peerId: string) => {
     const key = 'recent_peers';
-    const existing = localStorage.getItem(key);
-    let recents: RecentPeer[] = existing ? JSON.parse(existing) : [];
-    
-    // Create new entry
-    const newPeer: RecentPeer = {
-      id: Date.now().toString(),
-      peerId,
-      profile,
-      metAt: Date.now()
-    };
+    try {
+      const existing = localStorage.getItem(key);
+      let recents: RecentPeer[] = existing ? JSON.parse(existing) : [];
+      
+      // Create new entry
+      const newPeer: RecentPeer = {
+        id: Date.now().toString(),
+        peerId,
+        profile,
+        metAt: Date.now()
+      };
 
-    // Filter out duplicates (by username for simplicity) and keep last 20
-    recents = [newPeer, ...recents.filter(p => p.profile.username !== profile.username)].slice(0, 20);
-    localStorage.setItem(key, JSON.stringify(recents));
+      // Filter out duplicates (by username for simplicity) and keep last 20
+      recents = [newPeer, ...recents.filter(p => p.profile.username !== profile.username)].slice(0, 20);
+      localStorage.setItem(key, JSON.stringify(recents));
+    } catch (e) {
+      console.warn('Failed to save recent peer', e);
+    }
   }, []);
 
   // --- CLEANUP ---
@@ -136,6 +142,15 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       const payload: PeerData = { type: 'profile_update', payload: newProfile };
       connRef.current.send(payload);
     }
+    // Update presence status if we are in the lobby
+    if (channelRef.current && myPeerIdRef.current) {
+        channelRef.current.track({
+          peerId: myPeerIdRef.current,
+          status: status === ChatMode.CONNECTED ? 'busy' : 'waiting',
+          timestamp: Date.now(),
+          profile: newProfile
+        });
+    }
   }, [status]);
 
   const sendVanishMode = useCallback((isEnabled: boolean) => {
@@ -188,13 +203,20 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [cleanup, saveToRecent]);
 
   const setupConnection = useCallback((conn: DataConnection) => {
-    if (channelRef.current) {
-      channelRef.current.untrack();
+    // Instead of untracking, mark as busy to keep visibility in Online list
+    if (channelRef.current && myPeerIdRef.current) {
+       channelRef.current.track({
+          peerId: myPeerIdRef.current,
+          status: 'busy',
+          timestamp: Date.now(),
+          profile: userProfile
+       });
     }
 
     connRef.current = conn;
     
-    conn.on('open', () => {
+    // Explicitly cast to any to avoid TS errors with .on()
+    (conn as any).on('open', () => {
       setStatus(ChatMode.CONNECTED);
       setMessages([INITIAL_GREETING]);
       if (userProfile) {
@@ -202,9 +224,9 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       }
     });
 
-    conn.on('data', (data: any) => handleData(data));
+    (conn as any).on('data', (data: any) => handleData(data));
 
-    conn.on('close', () => {
+    (conn as any).on('close', () => {
       if (status === ChatMode.CONNECTED) {
         setStatus(ChatMode.DISCONNECTED);
         setMessages(prev => [...prev, STRANGER_DISCONNECTED_MSG]);
@@ -212,7 +234,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       cleanup();
     });
     
-    conn.on('error', () => {
+    (conn as any).on('error', () => {
       cleanup();
       setStatus(ChatMode.DISCONNECTED);
     });
@@ -279,17 +301,17 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     });
     peerRef.current = peer;
 
-    peer.on('open', (id) => {
+    (peer as any).on('open', (id: string) => {
       myPeerIdRef.current = id;
       joinLobby(id);
     });
 
-    peer.on('connection', (conn) => {
+    (peer as any).on('connection', (conn: DataConnection) => {
       isMatchmakerRef.current = true;
       setupConnection(conn);
     });
 
-    peer.on('error', (err) => {
+    (peer as any).on('error', (err: any) => {
       console.error("Peer Error:", err);
       if (status !== ChatMode.CONNECTED) {
          setStatus(ChatMode.ERROR);
@@ -311,7 +333,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     });
     peerRef.current = peer;
 
-    peer.on('open', (myId) => {
+    (peer as any).on('open', (myId: string) => {
        myPeerIdRef.current = myId;
        // Directly connect instead of joining lobby
        const conn = peer.connect(targetPeerId, { reliable: true });
@@ -323,7 +345,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
        }
     });
 
-    peer.on('error', (err) => {
+    (peer as any).on('error', (err: any) => {
       console.error("Direct Call Error:", err);
       alert("User is likely offline or has a new session ID.");
       setStatus(ChatMode.DISCONNECTED);
