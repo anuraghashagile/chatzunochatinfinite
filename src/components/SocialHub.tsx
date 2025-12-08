@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import { UserProfile, PresenceState, RecentPeer, Message, ChatMode, SessionType } from '../types';
@@ -40,16 +41,20 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global'>('online');
   const [recentPeers, setRecentPeers] = useState<RecentPeer[]>([]);
+  
+  // Inputs
   const [globalInput, setGlobalInput] = useState('');
   const [privateInput, setPrivateInput] = useState('');
   
-  // 'list' = showing users tabs, 'chat' = showing active private chat
-  const [viewMode, setViewMode] = useState<'list' | 'chat'>('list');
-
+  // Active Chat State
+  const [activePeer, setActivePeer] = useState<{id: string, profile: UserProfile} | null>(null);
+  const [localChatHistory, setLocalChatHistory] = useState<Message[]>([]);
+  
+  // Refs for scrolling
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const privateMessagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load Recent Peers from LocalStorage
+  // --- 1. LOAD RECENT PEERS ---
   useEffect(() => {
     if (isOpen) {
       const stored = localStorage.getItem('recent_peers');
@@ -61,35 +66,60 @@ export const SocialHub: React.FC<SocialHubProps> = ({
         }
       }
     }
-  }, [isOpen, chatStatus]); // Reload when status changes
+  }, [isOpen, chatStatus]);
 
-  // Auto-scroll Global Chat
+  // --- 2. LOAD CHAT HISTORY WHEN CLICKING A USER ---
   useEffect(() => {
-    if (activeTab === 'global' && isOpen && viewMode === 'list') {
+    if (activePeer) {
+      const storageKey = `chat_history_${activePeer.id}`;
+      const savedParams = localStorage.getItem(storageKey);
+      if (savedParams) {
+        try {
+          setLocalChatHistory(JSON.parse(savedParams));
+        } catch (e) {
+          setLocalChatHistory([]);
+        }
+      } else {
+        setLocalChatHistory([]);
+      }
+    }
+  }, [activePeer]);
+
+  // --- 3. SYNC REAL-TIME MESSAGES TO LOCAL HISTORY ---
+  // When 'privateMessages' (from App.tsx/useHumanChat) updates, we assume it's for the ACTIVE connection.
+  // We merge these into our local history for the active peer.
+  useEffect(() => {
+    if (activePeer && privateMessages.length > 0) {
+      // Get the last message received from the hook
+      const lastMsg = privateMessages[privateMessages.length - 1];
+      
+      setLocalChatHistory(prev => {
+        // Avoid duplicates based on ID
+        if (prev.some(m => m.id === lastMsg.id)) return prev;
+        
+        const newHistory = [...prev, lastMsg];
+        // Save to LS immediately
+        localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(newHistory));
+        return newHistory;
+      });
+    }
+  }, [privateMessages, activePeer]);
+
+  // --- SCROLLING ---
+  useEffect(() => {
+    if (activeTab === 'global' && isOpen && !activePeer) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [globalMessages, activeTab, isOpen, viewMode]);
+  }, [globalMessages, activeTab, isOpen, activePeer]);
 
-  // Auto-scroll Private Chat
   useEffect(() => {
-    if (viewMode === 'chat' && isOpen) {
+    if (activePeer && isOpen) {
       privateMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [privateMessages, viewMode, isOpen]);
+  }, [localChatHistory, activePeer, isOpen]);
 
-  // Sync internal ViewMode with External SessionType
-  // If we are in 'random' session, force list mode. 
-  // If we are in 'direct' session, force chat mode (if hub is open).
-  useEffect(() => {
-    if (sessionType === 'direct') {
-       setViewMode('chat');
-       // Auto-open hub if a direct session starts
-       setIsOpen(true);
-    } else {
-       // If random, we default to list, unless user is manually navigating
-       setViewMode('list');
-    }
-  }, [sessionType]);
+
+  // --- HANDLERS ---
 
   const handleGlobalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,20 +131,48 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
   const handlePrivateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (privateInput.trim()) {
+    if (privateInput.trim() && activePeer) {
+      // 1. Create Optimistic Message
+      const newMsg: Message = {
+        id: Date.now().toString(),
+        text: privateInput,
+        sender: 'me',
+        timestamp: Date.now(),
+        type: 'text',
+        reactions: []
+      };
+
+      // 2. Update Local State & Storage
+      const updatedHistory = [...localChatHistory, newMsg];
+      setLocalChatHistory(updatedHistory);
+      localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(updatedHistory));
+
+      // 3. Send over Network (if connected)
+      // Note: sendPrivateMessage internally in useHumanChat might fail if disconnected, 
+      // but we've already saved it locally so the user sees it sent.
       sendPrivateMessage(privateInput);
+
       setPrivateInput('');
     }
   };
 
-  const handleUserClick = (peerId: string, profile?: UserProfile) => {
-    // Initiate Call (Parent will set sessionType to 'direct')
+  const openPrivateChat = (peerId: string, profile?: UserProfile) => {
+    // Set active peer UI immediately
+    if (profile) {
+      setActivePeer({ id: peerId, profile });
+    }
+    
+    // Trigger connection in background (App.tsx handles this)
     onCallPeer(peerId, profile);
+  };
+
+  const closePrivateChat = () => {
+    setActivePeer(null);
   };
 
   return (
     <>
-      {/* FAB Trigger - Moved UP to bottom-36 (mobile) to avoid covering input bar */}
+      {/* FAB Trigger */}
       <button 
         onClick={() => setIsOpen(true)}
         className="fixed bottom-36 right-4 sm:bottom-6 sm:right-6 z-40 bg-brand-500 hover:bg-brand-600 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-4 border-slate-50 dark:border-slate-900"
@@ -131,23 +189,24 @@ export const SocialHub: React.FC<SocialHubProps> = ({
             {/* Header */}
             <div className="p-4 border-b border-slate-100 dark:border-white/5 flex items-center justify-between bg-slate-50/50 dark:bg-white/5 shrink-0">
               
-              {viewMode === 'chat' && sessionType === 'direct' ? (
+              {activePeer ? (
                 <div className="flex items-center gap-3">
-                   <button onClick={() => setViewMode('list')} className="p-2 -ml-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full">
+                   <button onClick={closePrivateChat} className="p-2 -ml-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full">
                      <ArrowLeft size={20} className="text-slate-500 dark:text-slate-200" />
                    </button>
                    <div>
                      <h2 className="font-bold text-lg text-slate-900 dark:text-white leading-tight">
-                       {currentPartner?.username || 'Stranger'}
+                       {activePeer.profile.username}
                      </h2>
                      <div className="flex items-center gap-1.5">
-                       {chatStatus === ChatMode.CONNECTED ? (
+                       {chatStatus === ChatMode.CONNECTED && currentPartner?.username === activePeer.profile.username ? (
                           <span className="text-xs text-emerald-500 font-medium flex items-center gap-1">
                             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"/> Online
                           </span>
                        ) : (
                           <span className="text-xs text-slate-400 font-medium">
-                            {error ? 'User Offline' : 'Connecting...'}
+                             {/* Show simple status, never error */}
+                             Offline (Saved)
                           </span>
                        )}
                      </div>
@@ -165,7 +224,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
             </div>
 
             {/* --- LIST MODE CONTENT --- */}
-            {(viewMode === 'list' || sessionType === 'random') && (
+            {!activePeer && (
               <>
                 {/* Tabs */}
                 <div className="flex p-1 bg-slate-100 dark:bg-slate-900 mx-4 mt-4 rounded-xl shrink-0">
@@ -203,15 +262,12 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                   {/* --- ONLINE TAB --- */}
                   {activeTab === 'online' && (
                     <div className="space-y-3">
-                      <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
-                        {onlineUsers.length} Active Users
-                      </div>
                       {onlineUsers.map((user, i) => (
                         <div 
                           key={i} 
                           onClick={() => {
-                            if (user.peerId !== myPeerId) {
-                              handleUserClick(user.peerId, user.profile);
+                            if (user.peerId !== myPeerId && user.profile) {
+                              openPrivateChat(user.peerId, user.profile);
                             }
                           }}
                           className={clsx(
@@ -231,79 +287,50 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                                     {user.profile?.username || 'Anonymous'}
                                     {user.profile?.username === myProfile?.username && <span className="text-[10px] text-brand-500 bg-brand-500/10 px-1.5 rounded-full shrink-0">(You)</span>}
                                   </div>
-                                  <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                                    {user.profile ? (
-                                      <>
-                                        <span>{user.profile.age}</span>
-                                        <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
-                                        <span>{user.profile.gender}</span>
-                                      </>
-                                    ) : (
-                                      <span>Guest</span>
-                                    )}
+                                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                                    {user.profile ? `${user.profile.age} • ${user.profile.gender}` : 'Guest'}
                                   </div>
                                 </div>
                              </div>
                              
                              <div className="flex items-center gap-2">
-                               {user.status === 'busy' && <Lock size={14} className="text-slate-400" />}
-                               <span className={clsx(
-                                  "w-2 h-2 rounded-full",
-                                  user.status === 'waiting' ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
-                                )}></span>
+                               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                              </div>
                           </div>
-                          
-                          {/* Visual Cue for Clickability */}
-                          {user.peerId !== myPeerId && (
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <MessageCircle size={20} className="text-brand-500" />
-                            </div>
-                          )}
                         </div>
                       ))}
-                      {onlineUsers.length === 0 && (
-                        <div className="text-center text-slate-500 py-10">No users found</div>
-                      )}
+                      {onlineUsers.length === 0 && <div className="text-center text-slate-500 py-10">No users found</div>}
                     </div>
                   )}
 
                   {/* --- RECENT TAB --- */}
                   {activeTab === 'recent' && (
                     <div className="space-y-3">
-                      {recentPeers.length === 0 ? (
-                        <div className="text-center text-slate-500 py-10">
-                          No recent history.
-                        </div>
-                      ) : (
-                        recentPeers.map((peer) => (
-                          <div 
-                            key={peer.id} 
-                            onClick={() => handleUserClick(peer.peerId, peer.profile)}
-                            className="flex items-center justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-white/5 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors group"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 text-lg font-bold shrink-0">
-                                {peer.profile.username[0].toUpperCase()}
+                      {recentPeers.map((peer) => (
+                        <div 
+                          key={peer.id} 
+                          onClick={() => openPrivateChat(peer.peerId, peer.profile)}
+                          className="flex items-center justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-white/5 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 text-lg font-bold shrink-0">
+                              {peer.profile.username[0].toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                {peer.profile.username}
                               </div>
-                              <div className="min-w-0">
-                                <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                                  {peer.profile.username}
-                                </div>
-                                <div className="text-xs text-slate-500">
-                                   Met {new Date(peer.metAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                </div>
+                              <div className="text-xs text-slate-500">
+                                 {new Date(peer.metAt).toLocaleDateString()}
                               </div>
                             </div>
-                            <button 
-                              className="p-2 bg-brand-100 text-brand-600 dark:bg-brand-900/30 dark:text-brand-400 rounded-lg group-hover:bg-brand-500 group-hover:text-white transition-colors"
-                              title="Chat Again"
-                            >
-                              <MessageCircle size={18} />
-                            </button>
                           </div>
-                        ))
-                      )}
+                          <div className="p-2 text-slate-400 group-hover:text-brand-500">
+                             <MessageCircle size={18} />
+                          </div>
+                        </div>
+                      ))}
+                      {recentPeers.length === 0 && <div className="text-center text-slate-500 py-10">No recent history.</div>}
                     </div>
                   )}
 
@@ -342,33 +369,24 @@ export const SocialHub: React.FC<SocialHubProps> = ({
               </>
             )}
 
-            {/* --- PRIVATE CHAT MODE CONTENT (IN-HUB, ONLY FOR DIRECT SESSIONS) --- */}
-            {viewMode === 'chat' && sessionType === 'direct' && (
+            {/* --- PRIVATE CHAT MODE (IN-DRAWER) --- */}
+            {activePeer && (
                <div className="flex-1 flex flex-col p-4 overflow-hidden min-h-0 relative">
                   
-                  {/* Inline Error/Status Banner - Non-blocking */}
-                  {error && (
-                    <div className="absolute top-0 left-0 right-0 z-10 p-2 animate-in slide-in-from-top">
-                      <div className="bg-amber-100 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2 flex items-center justify-center gap-2 text-xs font-medium text-amber-800 dark:text-amber-200">
-                        <Loader2 size={12} className="animate-spin" />
-                        {error}
-                      </div>
-                    </div>
-                  )}
-
                   <div className="flex-1 space-y-3 mb-4 overflow-y-auto min-h-0 pr-1 pt-2">
-                     {privateMessages.map(msg => (
+                     {localChatHistory.map(msg => (
                        <MessageBubble 
                           key={msg.id}
                           message={msg}
-                          senderName={currentPartner?.username}
+                          senderName={activePeer.profile.username}
                           onReact={sendReaction ? (emoji) => sendReaction(msg.id, emoji) : undefined}
                           onEdit={onEditMessage}
                        />
                      ))}
-                     {privateMessages.length === 0 && !error && (
+                     {localChatHistory.length === 0 && (
                        <div className="text-center text-slate-500 text-sm mt-10">
-                          {chatStatus === ChatMode.CONNECTED ? "Say hello!" : "Waiting for connection..."}
+                          Start a conversation with {activePeer.profile.username}.<br/>
+                          <span className="text-xs opacity-70">Messages are saved locally.</span>
                        </div>
                      )}
                      <div ref={privateMessagesEndRef} />
@@ -376,16 +394,16 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
                   <form onSubmit={handlePrivateSubmit} className="mt-auto flex gap-2 shrink-0 pb-1">
                      <input 
-                       className="flex-1 bg-slate-100 dark:bg-white/5 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none disabled:opacity-50"
+                       className="flex-1 bg-slate-100 dark:bg-white/5 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none"
                        placeholder="Type message..."
                        value={privateInput}
                        onChange={e => setPrivateInput(e.target.value)}
-                       // Allow typing even if not connected (optimistic UI)
+                       autoFocus
                      />
                      <button 
                        type="submit" 
                        disabled={!privateInput.trim()}
-                       className="p-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                       className="p-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50"
                      >
                        <Send size={18} />
                      </button>

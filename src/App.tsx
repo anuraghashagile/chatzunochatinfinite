@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Loader2, RefreshCw, EyeOff, Shield, Image as ImageIcon, Mic, X, Square, AlertTriangle } from 'lucide-react';
 import { supabase, saveMessageToHistory, fetchChatHistory } from './lib/supabase';
@@ -205,7 +206,7 @@ export default function App() {
 
   // Wrapper for Direct Calls from Social Hub
   const handleDirectCall = (peerId: string, profile?: UserProfile) => {
-    setSessionType('direct'); // Switch to Direct session mode
+    setSessionType('direct'); 
     callPeer(peerId, profile);
   };
 
@@ -312,8 +313,12 @@ export default function App() {
       return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
     }
 
-    // 2. Direct Chat Mode - SHOW IDLE BACKGROUND (Landing Page)
+    // 2. Direct Chat Mode - IMPORTANT: Don't show Landing Page background, 
+    // keep it clean or show random mode if it was active.
+    // However, if we are in Direct mode, we generally want the 'random chat' UI to be hidden 
+    // or just show a neutral "Lobby" state if no random chat is active.
     if (sessionType === 'direct') {
+       // Just show the Landing Page BG to look clean behind the modal
        return <LandingPage onlineCount={Math.max(onlineUsers.length, 1)} onStart={handleStartClick} />;
     }
 
@@ -442,7 +447,7 @@ export default function App() {
       )}
 
       {/* Error Toast */}
-      {error && (
+      {error && sessionType === 'random' && (
          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-5">
             <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
               <AlertTriangle size={16} /> {error}
