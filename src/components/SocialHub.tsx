@@ -1,47 +1,23 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle } from 'lucide-react';
+import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import { UserProfile, PresenceState, RecentPeer, Message, ChatMode } from '../types';
 import { clsx } from 'clsx';
 import { MessageBubble } from './MessageBubble';
 
 interface SocialHubProps {
   onlineUsers: PresenceState[];
-  onCallPeer: (peerId: string) => void;
+  onCallPeer: (peerId: string, profile?: UserProfile) => void;
   globalMessages: Message[];
   sendGlobalMessage: (text: string) => void;
   myProfile: UserProfile | null;
   myPeerId?: string | null;
-  
-  // New props for private chat inside Hub
   privateMessages: Message[];
   sendPrivateMessage: (text: string) => void;
-  // Added reaction support
   sendReaction?: (messageId: string, emoji: string) => void;
   currentPartner: UserProfile | null;
   chatStatus: ChatMode;
   error?: string | null;
 }
-
-const ErrorPopup = ({ onClose, message }: { onClose: () => void, message: string }) => (
-  <div className="absolute inset-0 z-[60] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 rounded-3xl">
-    <div className="bg-white dark:bg-[#1a1b26] p-6 rounded-3xl shadow-2xl w-full max-w-[280px] text-center border border-slate-200 dark:border-white/10 animate-in zoom-in-95 duration-200">
-       <div className="w-14 h-14 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
-         <Wifi size={28} />
-       </div>
-       <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 leading-tight">Connection Failed</h3>
-       <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
-         {message || "User is likely offline or has a new session ID."}
-       </p>
-       <button 
-         onClick={onClose} 
-         className="w-full py-3 bg-slate-900 dark:bg-white text-white dark:text-black rounded-xl font-bold text-sm hover:opacity-90 transition-opacity"
-       >
-         Okay
-       </button>
-    </div>
-  </div>
-);
 
 export const SocialHub: React.FC<SocialHubProps> = ({ 
   onlineUsers, 
@@ -62,7 +38,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   const [recentPeers, setRecentPeers] = useState<RecentPeer[]>([]);
   const [globalInput, setGlobalInput] = useState('');
   const [privateInput, setPrivateInput] = useState('');
-  const [showErrorModal, setShowErrorModal] = useState(false);
   
   // 'list' = showing users tabs, 'chat' = showing active private chat
   const [viewMode, setViewMode] = useState<'list' | 'chat'>('list');
@@ -82,14 +57,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
         }
       }
     }
-  }, [isOpen]);
-
-  // Handle errors
-  useEffect(() => {
-    if (error && isOpen && viewMode === 'chat') {
-      setShowErrorModal(true);
-    }
-  }, [error, isOpen, viewMode]);
+  }, [isOpen, chatStatus]); // Reload when status changes (after new connection)
 
   // Auto-scroll Global Chat
   useEffect(() => {
@@ -121,14 +89,11 @@ export const SocialHub: React.FC<SocialHubProps> = ({
     }
   };
 
-  const handleUserClick = (peerId: string) => {
+  const handleUserClick = (peerId: string, profile?: UserProfile) => {
+    // 1. Switch view immediately (Optimistic UI)
     setViewMode('chat');
-    onCallPeer(peerId);
-  };
-
-  const closeError = () => {
-    setShowErrorModal(false);
-    setViewMode('list'); // Go back to list on error
+    // 2. Initiate Call
+    onCallPeer(peerId, profile);
   };
 
   return (
@@ -139,8 +104,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
         className="fixed bottom-36 right-4 sm:bottom-6 sm:right-6 z-40 bg-brand-500 hover:bg-brand-600 text-white p-4 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center border-4 border-slate-50 dark:border-slate-900"
       >
         <MessageCircle size={28} />
-        {/* Unread dot simulation */}
-        <span className="absolute top-2 right-2 w-3 h-3 bg-red-500 rounded-full border-2 border-brand-500"></span>
       </button>
 
       {/* Drawer Overlay */}
@@ -149,10 +112,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
           
           <div className="bg-white dark:bg-[#0A0A0F] w-full sm:w-[400px] h-[80dvh] max-h-[800px] sm:h-[600px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-white/10 animate-in slide-in-from-bottom-10 sm:slide-in-from-right-10 duration-300 relative">
             
-            {showErrorModal && (
-              <ErrorPopup onClose={closeError} message={error || "User Unavailable"} />
-            )}
-
             {/* Header */}
             <div className="p-4 border-b border-slate-100 dark:border-white/5 flex items-center justify-between bg-slate-50/50 dark:bg-white/5 shrink-0">
               
@@ -165,8 +124,16 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                      <h2 className="font-bold text-lg text-slate-900 dark:text-white leading-tight">
                        {currentPartner?.username || 'Stranger'}
                      </h2>
-                     <div className="text-xs text-brand-500 font-medium">
-                       {chatStatus === ChatMode.CONNECTED ? 'Connected' : 'Connecting...'}
+                     <div className="flex items-center gap-1.5">
+                       {chatStatus === ChatMode.CONNECTED ? (
+                          <span className="text-xs text-emerald-500 font-medium flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"/> Online
+                          </span>
+                       ) : (
+                          <span className="text-xs text-slate-400 font-medium">
+                            {error ? 'User Offline' : 'Connecting...'}
+                          </span>
+                       )}
                      </div>
                    </div>
                 </div>
@@ -228,7 +195,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                           key={i} 
                           onClick={() => {
                             if (user.peerId !== myPeerId && user.status !== 'busy') {
-                              handleUserClick(user.peerId);
+                              handleUserClick(user.peerId, user.profile);
                             }
                           }}
                           className={clsx(
@@ -270,20 +237,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                                 )}></span>
                              </div>
                           </div>
-
-                          {/* Profile Bio/Interests */}
-                          {user.profile?.interests && user.profile.interests.length > 0 && (
-                             <div className="flex flex-wrap gap-1.5">
-                               {user.profile.interests.slice(0, 3).map((interest, idx) => (
-                                 <span key={idx} className="px-2 py-0.5 bg-white dark:bg-black/20 text-slate-500 dark:text-slate-400 rounded-md text-[10px] font-medium border border-slate-100 dark:border-white/5">
-                                   {interest}
-                                 </span>
-                               ))}
-                               {user.profile.interests.length > 3 && (
-                                 <span className="text-[10px] text-slate-400 flex items-center px-1">+{user.profile.interests.length - 3}</span>
-                               )}
-                             </div>
-                          )}
                           
                           {/* Visual Cue for Clickability */}
                           {user.peerId !== myPeerId && user.status !== 'busy' && (
@@ -310,7 +263,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                         recentPeers.map((peer) => (
                           <div 
                             key={peer.id} 
-                            onClick={() => handleUserClick(peer.peerId)}
+                            onClick={() => handleUserClick(peer.peerId, peer.profile)}
                             className="flex items-center justify-between p-3 bg-slate-50 dark:bg-white/5 rounded-xl border border-slate-100 dark:border-white/5 cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 transition-colors group"
                           >
                             <div className="flex items-center gap-3">
@@ -373,10 +326,21 @@ export const SocialHub: React.FC<SocialHubProps> = ({
               </>
             )}
 
-            {/* --- PRIVATE CHAT MODE CONTENT --- */}
+            {/* --- PRIVATE CHAT MODE CONTENT (IN-HUB) --- */}
             {viewMode === 'chat' && (
-               <div className="flex-1 flex flex-col p-4 overflow-hidden min-h-0">
-                  <div className="flex-1 space-y-3 mb-4 overflow-y-auto min-h-0 pr-1">
+               <div className="flex-1 flex flex-col p-4 overflow-hidden min-h-0 relative">
+                  
+                  {/* Inline Error/Status Banner - Non-blocking */}
+                  {error && (
+                    <div className="absolute top-0 left-0 right-0 z-10 p-2 animate-in slide-in-from-top">
+                      <div className="bg-amber-100 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-900/50 rounded-lg p-2 flex items-center justify-center gap-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                        <Loader2 size={12} className="animate-spin" />
+                        {error}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex-1 space-y-3 mb-4 overflow-y-auto min-h-0 pr-1 pt-2">
                      {privateMessages.map(msg => (
                        <MessageBubble 
                           key={msg.id}
@@ -385,8 +349,10 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                           onReact={sendReaction ? (emoji) => sendReaction(msg.id, emoji) : undefined}
                        />
                      ))}
-                     {privateMessages.length === 0 && (
-                       <div className="text-center text-slate-500 text-sm mt-10">Start the conversation!</div>
+                     {privateMessages.length === 0 && !error && (
+                       <div className="text-center text-slate-500 text-sm mt-10">
+                          {chatStatus === ChatMode.CONNECTED ? "Say hello!" : "Waiting for connection..."}
+                       </div>
                      )}
                      <div ref={privateMessagesEndRef} />
                   </div>
@@ -394,14 +360,14 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                   <form onSubmit={handlePrivateSubmit} className="mt-auto flex gap-2 shrink-0 pb-1">
                      <input 
                        className="flex-1 bg-slate-100 dark:bg-white/5 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none disabled:opacity-50"
-                       placeholder={chatStatus === ChatMode.CONNECTED ? "Type message..." : "Connecting..."}
+                       placeholder="Type message..."
                        value={privateInput}
                        onChange={e => setPrivateInput(e.target.value)}
-                       disabled={chatStatus !== ChatMode.CONNECTED}
+                       // Allow typing even if not connected (optimistic UI)
                      />
                      <button 
                        type="submit" 
-                       disabled={chatStatus !== ChatMode.CONNECTED || !privateInput.trim()}
+                       disabled={!privateInput.trim()}
                        className="p-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                      >
                        <Send size={18} />
