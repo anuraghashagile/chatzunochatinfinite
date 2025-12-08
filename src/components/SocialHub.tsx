@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle, Loader2, UserPlus, Heart } from 'lucide-react';
-import { UserProfile, PresenceState, RecentPeer, Message, ChatMode, SessionType, Friend } from '../types';
+import { UserProfile, PresenceState, RecentPeer, Message, ChatMode, SessionType, Friend, DirectMessageEvent } from '../types';
 import { clsx } from 'clsx';
 import { MessageBubble } from './MessageBubble';
 
@@ -11,8 +11,9 @@ interface SocialHubProps {
   sendGlobalMessage: (text: string) => void;
   myProfile: UserProfile | null;
   myPeerId?: string | null;
-  privateMessages: Message[];
-  sendPrivateMessage: (text: string) => void;
+  privateMessages: Message[]; // Main chat messages
+  sendPrivateMessage: (text: string) => void; // Main chat send
+  sendDirectMessage?: (peerId: string, text: string) => void; // Direct chat send
   sendReaction?: (messageId: string, emoji: string) => void;
   currentPartner: UserProfile | null;
   chatStatus: ChatMode;
@@ -20,6 +21,8 @@ interface SocialHubProps {
   onEditMessage?: (id: string, text: string) => void;
   sessionType: SessionType;
   incomingReaction?: { messageId: string, emoji: string, sender: 'stranger' } | null;
+  incomingDirectMessage?: DirectMessageEvent | null;
+  onCloseDirectChat?: () => void;
 }
 
 export const SocialHub: React.FC<SocialHubProps> = ({ 
@@ -31,13 +34,16 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   myPeerId,
   privateMessages,
   sendPrivateMessage,
+  sendDirectMessage,
   sendReaction,
   currentPartner,
   chatStatus,
   error,
   onEditMessage,
   sessionType,
-  incomingReaction
+  incomingReaction,
+  incomingDirectMessage,
+  onCloseDirectChat
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global' | 'friends'>('online');
@@ -89,35 +95,29 @@ export const SocialHub: React.FC<SocialHubProps> = ({
     }
   }, [activePeer]);
 
-  // --- 3. SYNC REAL-TIME MESSAGES TO LOCAL HISTORY ---
+  // --- 3. HANDLE INCOMING DIRECT MESSAGES ---
   useEffect(() => {
-    if (activePeer && privateMessages.length > 0) {
-      setLocalChatHistory(prev => {
-        const newHistory = [...prev];
-        let hasChanges = false;
-
-        privateMessages.forEach(msg => {
-          const index = newHistory.findIndex(m => m.id === msg.id);
-          if (index === -1) {
-            newHistory.push(msg);
-            hasChanges = true;
-          } else {
-            // Check for updates (reactions/edits) using stringify for deep compare
-            if (JSON.stringify(newHistory[index]) !== JSON.stringify(msg)) {
-               newHistory[index] = msg;
-               hasChanges = true;
-            }
-          }
-        });
-
-        if (hasChanges) {
-          localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(newHistory));
-          return newHistory;
+    if (incomingDirectMessage) {
+      const { peerId, message } = incomingDirectMessage;
+      
+      // Update persistent storage for this peer
+      const storageKey = `chat_history_${peerId}`;
+      const existingHistory = localStorage.getItem(storageKey);
+      let history: Message[] = existingHistory ? JSON.parse(existingHistory) : [];
+      
+      // Avoid duplicates
+      if (!history.some(m => m.id === message.id)) {
+        history.push(message);
+        localStorage.setItem(storageKey, JSON.stringify(history));
+        
+        // If this peer is active in the view, update the view state
+        if (activePeer && activePeer.id === peerId) {
+          setLocalChatHistory(history);
         }
-        return prev;
-      });
+      }
     }
-  }, [privateMessages, activePeer]);
+  }, [incomingDirectMessage, activePeer]);
+
 
   // --- 4. SYNC INCOMING REACTIONS TO HISTORICAL MESSAGES ---
   useEffect(() => {
@@ -184,8 +184,13 @@ export const SocialHub: React.FC<SocialHubProps> = ({
       setLocalChatHistory(updatedHistory);
       localStorage.setItem(`chat_history_${activePeer.id}`, JSON.stringify(updatedHistory));
 
-      // 3. Send over Network (if connected)
-      sendPrivateMessage(privateInput);
+      // 3. Send over Network (Directly to peer)
+      if (sendDirectMessage) {
+        sendDirectMessage(activePeer.id, privateInput);
+      } else {
+        // Fallback (Legacy behaviour if hook not updated)
+        sendPrivateMessage(privateInput);
+      }
 
       setPrivateInput('');
     }
@@ -215,15 +220,14 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   const openPrivateChat = (peerId: string, profile?: UserProfile) => {
     if (profile) {
       setActivePeer({ id: peerId, profile });
-    }
-    // Only attempt call if not already connected to this person
-    if (currentPartner?.username !== profile?.username) {
-        onCallPeer(peerId, profile);
+      // Initiate direct connection without breaking main chat
+      onCallPeer(peerId, profile);
     }
   };
 
   const closePrivateChat = () => {
     setActivePeer(null);
+    if (onCloseDirectChat) onCloseDirectChat();
   };
 
   return (
@@ -255,7 +259,10 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                        {activePeer.profile.username}
                      </h2>
                      <div className="flex items-center gap-1.5">
-                       {chatStatus === ChatMode.CONNECTED && currentPartner?.username === activePeer.profile.username ? (
+                       {/* This status is tricky because 'chatStatus' reflects main chat. 
+                           For Social Hub, we are always effectively "connected" via lobby or direct.
+                           We'll assume online if in online list. */}
+                       {onlineUsers.some(u => u.peerId === activePeer.id) ? (
                           <span className="text-xs text-emerald-500 font-medium flex items-center gap-1">
                             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"/> Online
                           </span>

@@ -73,7 +73,9 @@ export default function App() {
     friends,
     incomingFriendRequest, 
     incomingReaction,
+    incomingDirectMessage, // New hook export
     sendMessage, 
+    sendDirectMessage, // New hook export
     sendImage, 
     sendAudio,
     sendReaction,
@@ -177,7 +179,7 @@ export default function App() {
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
-  // Auto-scroll
+  // Auto-scroll for Main Chat
   useEffect(() => {
     if (sessionType === 'random') {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -210,6 +212,9 @@ export default function App() {
 
   // Wrapper for Direct Calls from Social Hub
   const handleDirectCall = (peerId: string, profile?: UserProfile) => {
+    // We set sessionType to direct to allow specific UI handling if needed,
+    // but we do NOT disconnect the main chat anymore.
+    // The Social Hub will handle the view.
     setSessionType('direct'); 
     callPeer(peerId, profile);
   };
@@ -218,6 +223,7 @@ export default function App() {
     e.preventDefault();
     if (!inputText.trim()) return;
     
+    // Send to Main Chat (Stranger)
     sendMessage(inputText);
     
     if (settings.vanishMode) {
@@ -244,8 +250,8 @@ export default function App() {
   };
 
   const handleNewChat = () => {
-    setSessionType('random'); // Ensure we go back to random mode
-    disconnect(); 
+    setSessionType('random'); 
+    disconnect(); // Disconnects main chat only
     setTimeout(connect, 200);
   };
 
@@ -312,19 +318,23 @@ export default function App() {
 
   // --- VIEW RENDERING LOGIC ---
   const renderMainContent = () => {
-    // 1. Direct Session (Social Hub Active)
-    // We render a simple background to indicate "Home" state without distracting UI
+    // 1. Direct Session Mode (Social Hub View Priority)
+    // Even if connected to stranger, if user explicitly entered "Direct Mode" (e.g. via Social Hub interaction that set sessionType),
+    // we might want to show wallpaper.
+    // However, user requested "simultaneous".
+    // So "Direct" mode inside Social Hub should be handled by the SocialHub component itself (overlay).
+    // The main background should reflect the Main Chat state (Connected, Searching, etc).
+    // BUT if the user wants "Chat A... Chat B... separate", we should probably reset sessionType to 'random' if they close Social Hub.
+    
     if (sessionType === 'direct') {
        return (
          <div className="h-full w-full flex items-center justify-center relative overflow-hidden">
-            {/* Neutral Background/Wallpaper */}
             <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
             <div className="text-center p-8 opacity-40">
                <div className="w-24 h-24 bg-slate-200 dark:bg-white/5 rounded-full mx-auto mb-4 flex items-center justify-center">
                   <Shield size={40} />
                </div>
                <h3 className="text-xl font-bold mb-2">Social Hub Active</h3>
-               <p className="text-sm">Chatting with friends...</p>
             </div>
          </div>
        );
@@ -547,7 +557,8 @@ export default function App() {
           myProfile={userProfile}
           myPeerId={myPeerId}
           privateMessages={messages}
-          sendPrivateMessage={sendMessage}
+          sendPrivateMessage={sendMessage} // For Social Hub generic send
+          sendDirectMessage={sendDirectMessage} // NEW: Specific direct message send
           sendReaction={sendReaction}
           currentPartner={partnerProfile}
           chatStatus={status}
@@ -555,6 +566,8 @@ export default function App() {
           onEditMessage={initiateEdit}
           sessionType={sessionType}
           incomingReaction={incomingReaction}
+          incomingDirectMessage={incomingDirectMessage} // NEW: Incoming direct message
+          onCloseDirectChat={() => setSessionType('random')} // Handler to reset view
         />
       )}
     </div>

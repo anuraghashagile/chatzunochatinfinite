@@ -77,3 +77,13 @@ export interface AppSettings {
   textSize: 'small' | 'medium' | 'large';
   vanishMode: boolean;
 }
+
+// Metadata to distinguish connection intent
+export interface ConnectionMetadata {
+  type: 'random' | 'direct';
+}
+
+export interface DirectMessageEvent {
+  peerId: string;
+  message: Message;
+}
