@@ -3,7 +3,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { supabase } from '../lib/supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
-import { Message, ChatMode, PeerData, PresenceState, UserProfile } from '../types';
+import { Message, ChatMode, PeerData, PresenceState, UserProfile, RecentPeer } from '../types';
 import { 
   INITIAL_GREETING, 
   STRANGER_DISCONNECTED_MSG, 
@@ -19,6 +19,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const [partnerRecording, setPartnerRecording] = useState(false);
   const [partnerProfile, setPartnerProfile] = useState<UserProfile | null>(null);
   const [remoteVanishMode, setRemoteVanishMode] = useState<boolean | null>(null);
+  const [onlineUsers, setOnlineUsers] = useState<PresenceState[]>([]);
   
   const peerRef = useRef<Peer | null>(null);
   const connRef = useRef<DataConnection | null>(null);
@@ -26,8 +27,28 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const myPeerIdRef = useRef<string | null>(null);
   const isMatchmakerRef = useRef(false);
 
+  // --- PERSIST RECENT PEERS ---
+  const saveToRecent = useCallback((profile: UserProfile, peerId: string) => {
+    const key = 'recent_peers';
+    const existing = localStorage.getItem(key);
+    let recents: RecentPeer[] = existing ? JSON.parse(existing) : [];
+    
+    // Create new entry
+    const newPeer: RecentPeer = {
+      id: Date.now().toString(),
+      peerId,
+      profile,
+      metAt: Date.now()
+    };
+
+    // Filter out duplicates (by username for simplicity) and keep last 20
+    recents = [newPeer, ...recents.filter(p => p.profile.username !== profile.username)].slice(0, 20);
+    localStorage.setItem(key, JSON.stringify(recents));
+  }, []);
+
   // --- CLEANUP ---
   const cleanup = useCallback(() => {
+    // We don't untrack presence completely if we want to stay "Online" but busy
     if (channelRef.current) {
       channelRef.current.untrack(); 
       supabase.removeChannel(channelRef.current);
@@ -48,8 +69,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     isMatchmakerRef.current = false;
     setPartnerTyping(false);
     setPartnerRecording(false);
-    // Do NOT clear partner profile immediately on disconnect, 
-    // so we can still show "Chat with [Name] Ended"
   }, []);
 
   // --- MESSAGING ---
@@ -153,6 +172,10 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       setPartnerRecording(data.payload);
     } else if (data.type === 'profile') {
       setPartnerProfile(data.payload);
+      // Save connection to history immediately when we receive profile
+      if (connRef.current?.peer) {
+        saveToRecent(data.payload, connRef.current.peer);
+      }
     } else if (data.type === 'profile_update') {
       setPartnerProfile(data.payload);
     } else if (data.type === 'vanish_mode') {
@@ -162,7 +185,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       setMessages(prev => [...prev, STRANGER_DISCONNECTED_MSG]);
       cleanup();
     }
-  }, [cleanup]);
+  }, [cleanup, saveToRecent]);
 
   const setupConnection = useCallback((conn: DataConnection) => {
     if (channelRef.current) {
@@ -207,25 +230,26 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     channel
       .on('presence', { event: 'sync' }, () => {
         const newState = channel.presenceState();
+        
+        // Update Online Users List with Profiles
+        const allUsers = Object.values(newState).flat() as unknown as PresenceState[];
+        setOnlineUsers(allUsers);
+
         if (isMatchmakerRef.current || connRef.current?.open) return;
 
-        const users = Object.values(newState).flat() as unknown as PresenceState[];
-        
-        const sortedWaiters = users
+        const sortedWaiters = allUsers
           .filter(u => u.status === 'waiting')
           .sort((a, b) => a.timestamp - b.timestamp);
 
         const oldestWaiter = sortedWaiters[0];
 
         if (oldestWaiter && oldestWaiter.peerId !== myId) {
-           console.log("I am new. Calling the oldest waiter:", oldestWaiter.peerId);
+           console.log("Found partner. Connecting:", oldestWaiter.peerId);
            isMatchmakerRef.current = true;
            const conn = peerRef.current?.connect(oldestWaiter.peerId, { reliable: true });
            if (conn) {
              setupConnection(conn);
            }
-        } else {
-           console.log("I am the oldest (or alone). Waiting for a call...");
         }
       })
       .subscribe(async (status) => {
@@ -233,18 +257,18 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
           await channel.track({
             peerId: myId,
             status: 'waiting',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            profile: userProfile // Broadcast profile so others see my name in Social Hub
           });
           setStatus(ChatMode.WAITING);
         }
       });
 
-  }, [setupConnection]);
+  }, [setupConnection, userProfile]);
 
-
+  // --- CONNECT / CALL ---
   const connect = useCallback(() => {
     cleanup();
-    // Clear messages only when starting a NEW connection
     setMessages([]);
     setPartnerProfile(null);
     setRemoteVanishMode(null);
@@ -274,13 +298,45 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
   }, [cleanup, joinLobby, setupConnection, status]);
 
+  // --- DIRECT CALL (From Recent) ---
+  const callPeer = useCallback((targetPeerId: string) => {
+    cleanup();
+    setMessages([]);
+    setPartnerProfile(null);
+    setStatus(ChatMode.SEARCHING); 
+
+    const peer = new Peer({
+      debug: 0,
+      config: { iceServers: ICE_SERVERS }
+    });
+    peerRef.current = peer;
+
+    peer.on('open', (myId) => {
+       myPeerIdRef.current = myId;
+       // Directly connect instead of joining lobby
+       const conn = peer.connect(targetPeerId, { reliable: true });
+       if (conn) {
+         setupConnection(conn);
+       } else {
+         alert("Could not create connection.");
+         setStatus(ChatMode.IDLE);
+       }
+    });
+
+    peer.on('error', (err) => {
+      console.error("Direct Call Error:", err);
+      alert("User is likely offline or has a new session ID.");
+      setStatus(ChatMode.DISCONNECTED);
+    });
+
+  }, [cleanup, setupConnection]);
+
   const disconnect = useCallback(() => {
     if (connRef.current && connRef.current.open) {
       connRef.current.send({ type: 'disconnect' });
     }
     cleanup();
-    setStatus(ChatMode.DISCONNECTED); // KEY FIX: Go to DISCONNECTED, not IDLE
-    // Do NOT clear messages here. 
+    setStatus(ChatMode.DISCONNECTED);
   }, [cleanup]);
 
   useEffect(() => {
@@ -294,6 +350,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     partnerRecording,
     partnerProfile,
     remoteVanishMode,
+    onlineUsers, // Exporting for Social Hub
     sendMessage, 
     sendImage,
     sendAudio,
@@ -301,7 +358,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     sendRecording,
     updateMyProfile,
     sendVanishMode,
-    connect, 
+    connect,
+    callPeer, // Exporting for Social Hub
     disconnect 
   };
 };

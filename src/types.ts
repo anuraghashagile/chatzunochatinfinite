@@ -38,8 +38,16 @@ export interface PeerData {
 // Presence state for the lobby
 export interface PresenceState {
   peerId: string;
-  status: 'waiting' | 'paired';
+  status: 'waiting' | 'paired' | 'busy';
   timestamp: number;
+  profile?: UserProfile; // Added to show names in Online list
+}
+
+export interface RecentPeer {
+  id: string;
+  peerId: string; // The last known session ID
+  profile: UserProfile;
+  metAt: number;
 }
 
 export interface AppSettings {
