@@ -1,3 +1,4 @@
+
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { supabase } from '../lib/supabase';
@@ -101,7 +102,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       let friendList: Friend[] = existing ? JSON.parse(existing) : [];
       
       // Check if already exists
-      if (friendList.some(f => f.profile.username === profile.username)) return;
+      if (friendList.some(f => f.id === peerId)) return;
 
       const newFriend: Friend = {
         id: peerId, 
@@ -559,6 +560,36 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     }
   }, [setupConnection]);
 
+  // --- SEND DIRECT FRIEND REQUEST ---
+  const sendDirectFriendRequest = useCallback((targetPeerId: string) => {
+     if (!userProfile) return;
+     
+     let conn = directConnsRef.current.get(targetPeerId);
+     
+     const send = (c: DataConnection) => {
+        c.send({ type: 'friend_request', payload: userProfile });
+     };
+
+     if (conn && conn.open) {
+        send(conn);
+     } else if (peerRef.current) {
+        try {
+           // Establish temporary or permanent connection for the request
+           conn = peerRef.current.connect(targetPeerId, { 
+             reliable: true,
+             metadata: { type: 'direct' }
+           });
+           
+           if (conn) {
+              setupConnection(conn, { type: 'direct' });
+              conn.on('open', () => send(conn!));
+           }
+        } catch(e) {
+           console.error("Failed to send friend request", e);
+        }
+     }
+  }, [userProfile, setupConnection]);
+
   // --- CALL PEER (Direct) ---
   const callPeer = useCallback((targetPeerId: string, targetProfile?: UserProfile) => {
     const peer = initPeer();
@@ -669,6 +700,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     incomingDirectMessage, 
     sendMessage, 
     sendDirectMessage,
+    sendDirectFriendRequest, // Exported new function
     sendImage,
     sendAudio,
     sendReaction,

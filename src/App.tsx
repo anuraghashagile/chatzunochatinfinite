@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Loader2, RefreshCw, EyeOff, Shield, Image as ImageIcon, Mic, X, Square, AlertTriangle, UserPlus, Check } from 'lucide-react';
 import { supabase, saveMessageToHistory, fetchChatHistory } from './lib/supabase';
@@ -87,9 +89,10 @@ export default function App() {
     friends,
     incomingFriendRequest, 
     incomingReaction,
-    incomingDirectMessage, // New hook export
+    incomingDirectMessage, 
     sendMessage, 
-    sendDirectMessage, // New hook export
+    sendDirectMessage,
+    sendDirectFriendRequest, // New hook export
     sendImage, 
     sendAudio,
     sendReaction,
@@ -105,7 +108,7 @@ export default function App() {
     disconnect 
   } = useHumanChat(userProfile);
 
-  const { globalMessages, sendGlobalMessage } = useGlobalChat(userProfile);
+  const { globalMessages, sendGlobalMessage } = useGlobalChat(userProfile, myPeerId);
 
   // --- AUTO LOGIN ---
   useEffect(() => {
@@ -417,7 +420,10 @@ export default function App() {
               </div>
             )}
 
-            <form onSubmit={handleSendMessage} className="flex gap-2 items-end">
+            <form onSubmit={handleSendMessage} className="flex gap-2 items-end relative">
+              {/* --- ANCHOR FOR SOCIAL HUB BUTTON --- */}
+              <div id="social-hub-trigger-anchor" className="absolute bottom-[calc(100%+8px)] right-0 z-30"></div>
+              
               <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} disabled={status !== ChatMode.CONNECTED}/>
               <button type="button" onClick={() => fileInputRef.current?.click()} className="p-3 text-slate-400 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50 shrink-0"><ImageIcon size={24} /></button>
               {!inputText.trim() && (
@@ -563,6 +569,7 @@ export default function App() {
           privateMessages={messages}
           sendPrivateMessage={sendMessage} // For Social Hub generic send
           sendDirectMessage={sendDirectMessage} // NEW: Specific direct message send
+          sendDirectFriendRequest={sendDirectFriendRequest} // NEW: Specific friend request send
           sendReaction={sendReaction}
           currentPartner={partnerProfile}
           chatStatus={status}
@@ -570,8 +577,9 @@ export default function App() {
           onEditMessage={initiateEdit}
           sessionType={sessionType}
           incomingReaction={incomingReaction}
-          incomingDirectMessage={incomingDirectMessage} // NEW: Incoming direct message
-          onCloseDirectChat={() => setSessionType('random')} // Handler to reset view
+          incomingDirectMessage={incomingDirectMessage} 
+          onCloseDirectChat={() => setSessionType('random')} 
+          friends={friends} // Pass real-time friends list
         />
       )}
     </div>

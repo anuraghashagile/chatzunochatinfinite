@@ -33,6 +33,7 @@ export interface Message {
   type: MessageType;
   sender: 'me' | 'stranger' | 'system';
   senderName?: string; // Added for Global Chat identification
+  senderPeerId?: string; // Added for P2P connection from Global Chat
   timestamp: number;
   isVanish?: boolean;
   reactions?: Reaction[]; // Added for reactions

@@ -8,7 +8,7 @@ type RealtimeChannel = ReturnType<typeof supabase.channel>;
 
 const GLOBAL_CHAT_CHANNEL = 'global-chat-room';
 
-export const useGlobalChat = (userProfile: UserProfile | null) => {
+export const useGlobalChat = (userProfile: UserProfile | null, myPeerId: string | null) => {
   const [globalMessages, setGlobalMessages] = useState<Message[]>([]);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
@@ -36,7 +36,8 @@ export const useGlobalChat = (userProfile: UserProfile | null) => {
       id: Date.now().toString() + Math.random().toString(),
       text,
       sender: 'stranger',
-      senderName: userProfile.username, // Send my name
+      senderName: userProfile.username, 
+      senderPeerId: myPeerId || undefined, // Include my peer ID so others can add/message me
       timestamp: Date.now(),
       type: 'text'
     };
@@ -50,7 +51,7 @@ export const useGlobalChat = (userProfile: UserProfile | null) => {
 
     // Add to local state (sender: 'me')
     setGlobalMessages((prev) => [...prev, { ...newMessage, sender: 'me' }]);
-  }, [userProfile]);
+  }, [userProfile, myPeerId]);
 
   return {
     globalMessages,

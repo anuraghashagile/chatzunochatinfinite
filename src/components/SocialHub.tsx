@@ -1,8 +1,12 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, History, Globe, MessageCircle, X, Wifi, Phone, Lock, ArrowLeft, Send, Zap, AlertTriangle, Loader2, UserPlus, Heart } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Users, History, Globe, MessageCircle, X, Wifi, Heart, ArrowLeft, Send, UserPlus, Check } from 'lucide-react';
 import { UserProfile, PresenceState, RecentPeer, Message, ChatMode, SessionType, Friend, DirectMessageEvent } from '../types';
 import { clsx } from 'clsx';
 import { MessageBubble } from './MessageBubble';
+import { Button } from './Button';
 
 interface SocialHubProps {
   onlineUsers: PresenceState[];
@@ -14,6 +18,7 @@ interface SocialHubProps {
   privateMessages: Message[]; // Main chat messages
   sendPrivateMessage: (text: string) => void; // Main chat send
   sendDirectMessage?: (peerId: string, text: string, id?: string) => void; // Direct chat send updated signature
+  sendDirectFriendRequest?: (peerId: string) => void; // New prop for friend requests
   sendReaction?: (messageId: string, emoji: string) => void;
   currentPartner: UserProfile | null;
   chatStatus: ChatMode;
@@ -23,6 +28,7 @@ interface SocialHubProps {
   incomingReaction?: { messageId: string, emoji: string, sender: 'stranger' } | null;
   incomingDirectMessage?: DirectMessageEvent | null;
   onCloseDirectChat?: () => void;
+  friends?: Friend[]; // Accept friends as prop
 }
 
 export const SocialHub: React.FC<SocialHubProps> = ({ 
@@ -35,6 +41,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   privateMessages,
   sendPrivateMessage,
   sendDirectMessage,
+  sendDirectFriendRequest,
   sendReaction,
   currentPartner,
   chatStatus,
@@ -43,12 +50,13 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   sessionType,
   incomingReaction,
   incomingDirectMessage,
-  onCloseDirectChat
+  onCloseDirectChat,
+  friends: friendsProp = []
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'online' | 'recent' | 'global' | 'friends'>('online');
   const [recentPeers, setRecentPeers] = useState<RecentPeer[]>([]);
-  const [friends, setFriends] = useState<Friend[]>([]);
+  const [friends, setFriends] = useState<Friend[]>(friendsProp);
   
   // Notification State
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
@@ -61,9 +69,30 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   const [activePeer, setActivePeer] = useState<{id: string, profile: UserProfile} | null>(null);
   const [localChatHistory, setLocalChatHistory] = useState<Message[]>([]);
   
+  // User Actions Modal State (Global Chat)
+  const [selectedGlobalUser, setSelectedGlobalUser] = useState<{id: string, name: string} | null>(null);
+
   // Refs for scrolling
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const privateMessagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Portal Target for Trigger Button
+  const [triggerTarget, setTriggerTarget] = useState<HTMLElement | null>(null);
+
+  // Update trigger target when status changes (input bar mounts/unmounts)
+  useEffect(() => {
+    // Small timeout to allow DOM to update
+    const timer = setTimeout(() => {
+      const el = document.getElementById('social-hub-trigger-anchor');
+      setTriggerTarget(el);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [chatStatus]);
+
+  // Sync friends prop
+  useEffect(() => {
+    setFriends(friendsProp);
+  }, [friendsProp]);
 
   // --- 1. LOAD DATA ---
   useEffect(() => {
@@ -71,11 +100,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
     const storedRecents = localStorage.getItem('recent_peers');
     if (storedRecents) {
       try { setRecentPeers(JSON.parse(storedRecents)); } catch (e) {}
-    }
-    // Load Friends
-    const storedFriends = localStorage.getItem('chat_friends');
-    if (storedFriends) {
-      try { setFriends(JSON.parse(storedFriends)); } catch (e) {}
     }
   }, [isOpen, chatStatus, incomingDirectMessage]); // Reload when message arrives to update Recents order
 
@@ -253,27 +277,46 @@ export const SocialHub: React.FC<SocialHubProps> = ({
     if (onCloseDirectChat) onCloseDirectChat();
   };
 
+  const handleFriendRequest = (peerId: string) => {
+     if (sendDirectFriendRequest) {
+        sendDirectFriendRequest(peerId);
+        // Maybe show toast or success state locally
+        alert("Friend request sent!");
+        setSelectedGlobalUser(null);
+     }
+  };
+
+  const isFriend = (peerId: string) => {
+    return friends.some(f => f.id === peerId);
+  };
+
   const getTotalUnreadCount = () => Object.values(unreadCounts).reduce((a, b) => a + b, 0);
 
-  return (
-    <>
-      {/* FAB Trigger - Updated sizing and positioning for better visibility across devices */}
-      <button 
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-24 right-5 sm:bottom-10 sm:right-10 z-[60] w-14 h-14 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-2xl shadow-brand-500/40 transition-transform hover:scale-105 active:scale-95 flex items-center justify-center border-[3px] border-slate-50 dark:border-slate-900 relative"
-        aria-label="Open Social Hub"
-      >
-        <Users size={26} strokeWidth={2.5} />
-        {getTotalUnreadCount() > 0 && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center text-[10px] font-bold animate-pulse shadow-sm">
-            {getTotalUnreadCount() > 9 ? '9+' : getTotalUnreadCount()}
-          </span>
-        )}
-      </button>
+  // --- RENDER CONTENT ---
+  
+  const TriggerButton = (
+    <button 
+      onClick={() => setIsOpen(true)}
+      className={clsx(
+        "z-[60] w-12 h-12 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-2xl shadow-brand-500/40 transition-transform hover:scale-105 active:scale-95 flex items-center justify-center border-2 border-slate-50 dark:border-slate-900 relative",
+        // If anchored, we don't need fixed positioning. If not anchored, we fallback to fixed bottom-right.
+        !triggerTarget && "fixed bottom-24 right-5 sm:bottom-10 sm:right-10 w-14 h-14" 
+      )}
+      aria-label="Open Social Hub"
+    >
+      <Users size={triggerTarget ? 22 : 26} strokeWidth={2.5} />
+      {getTotalUnreadCount() > 0 && (
+        <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center text-[10px] font-bold animate-pulse shadow-sm">
+          {getTotalUnreadCount() > 9 ? '9+' : getTotalUnreadCount()}
+        </span>
+      )}
+    </button>
+  );
 
-      {/* Drawer Overlay */}
-      {isOpen && (
-        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-end sm:p-6 bg-black/40 backdrop-blur-sm animate-in fade-in">
+  const DrawerOverlay = (
+    <>
+       {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-end sm:p-6 bg-black/40 backdrop-blur-sm animate-in fade-in">
           
           <div className="bg-white dark:bg-[#0A0A0F] w-full sm:w-[400px] h-[80dvh] max-h-[800px] sm:h-[600px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-white/10 animate-in slide-in-from-bottom-10 sm:slide-in-from-right-10 duration-300 relative">
             
@@ -352,27 +395,29 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                       {onlineUsers.map((user, i) => (
                         <div 
                           key={i} 
-                          onClick={() => {
-                            if (user.peerId !== myPeerId && user.profile) {
-                              openPrivateChat(user.peerId, user.profile);
-                            }
-                          }}
                           className={clsx(
-                            "flex flex-col p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-white/5 transition-all group relative overflow-hidden",
+                            "flex items-center justify-between p-4 bg-slate-50 dark:bg-white/5 rounded-2xl border border-slate-100 dark:border-white/5 transition-all group relative overflow-hidden",
                             (user.peerId === myPeerId)
                               ? "opacity-60 cursor-not-allowed" 
-                              : "cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 active:scale-[0.98]"
+                              : "hover:bg-slate-100 dark:hover:bg-white/10"
                           )}
                         >
-                          <div className="flex items-start justify-between">
-                             <div className="flex items-center gap-3">
+                          {/* Main User Info - Click to Open Chat */}
+                          <div 
+                             className="flex flex-1 items-center gap-3 cursor-pointer"
+                             onClick={() => {
+                                if (user.peerId !== myPeerId && user.profile) {
+                                  openPrivateChat(user.peerId, user.profile);
+                                }
+                             }}
+                          >
                                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-400 to-violet-500 flex items-center justify-center text-white font-bold shrink-0 shadow-lg relative">
                                   {user.profile?.username?.[0]?.toUpperCase() || '?'}
                                   {unreadCounts[user.peerId] > 0 && (
                                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border border-white dark:border-slate-900" />
                                   )}
                                 </div>
-                                <div>
+                                <div className="min-w-0">
                                   <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                                     {user.profile?.username || 'Anonymous'}
                                     {user.profile?.username === myProfile?.username && <span className="text-[10px] text-brand-500 bg-brand-500/10 px-1.5 rounded-full shrink-0">(You)</span>}
@@ -381,8 +426,30 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                                     {user.profile ? `${user.profile.age} • ${user.profile.gender}` : 'Guest'}
                                   </div>
                                 </div>
-                             </div>
-                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex items-center gap-2 pl-3 border-l border-slate-100 dark:border-white/5 ml-3">
+                             {user.peerId !== myPeerId && (
+                                <>
+                                   {!isFriend(user.peerId) ? (
+                                     <button 
+                                       onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleFriendRequest(user.peerId);
+                                       }}
+                                       className="p-2 text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded-full transition-colors"
+                                       title="Add Friend"
+                                     >
+                                        <UserPlus size={18} />
+                                     </button>
+                                   ) : (
+                                     <div className="p-2 text-emerald-500">
+                                       <Heart size={18} fill="currentColor" />
+                                     </div>
+                                   )}
+                                </>
+                             )}
                           </div>
                         </div>
                       ))}
@@ -469,14 +536,24 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
                   {/* --- GLOBAL TAB --- */}
                   {activeTab === 'global' && (
-                    <div className="h-full flex flex-col">
+                    <div className="h-full flex flex-col relative">
                       <div className="flex-1 space-y-3 mb-4 min-h-0">
                          {globalMessages.map(msg => (
                            <div key={msg.id} className={clsx("flex flex-col", msg.sender === 'me' ? "items-end" : "items-start")}>
                               <div className="px-3 py-2 rounded-xl text-sm max-w-[85%] bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white break-words">
-                                 <span className="text-[10px] text-brand-500 block font-bold mb-0.5">
+                                 <button 
+                                   onClick={() => {
+                                      if (msg.sender !== 'me' && msg.senderPeerId) {
+                                         setSelectedGlobalUser({ id: msg.senderPeerId, name: msg.senderName || 'Unknown' });
+                                      }
+                                   }}
+                                   className={clsx(
+                                     "text-[10px] block font-bold mb-0.5",
+                                     msg.sender === 'me' ? "text-brand-500 cursor-default" : "text-brand-500 hover:underline cursor-pointer"
+                                   )}
+                                 >
                                    {msg.sender === 'me' ? 'You' : msg.senderName}
-                                 </span>
+                                 </button>
                                  {msg.text}
                               </div>
                            </div>
@@ -494,6 +571,34 @@ export const SocialHub: React.FC<SocialHubProps> = ({
                            <Send size={18} />
                          </button>
                       </form>
+
+                      {/* --- Global User Action Modal --- */}
+                      {selectedGlobalUser && (
+                         <div className="absolute inset-0 z-10 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm rounded-xl animate-in fade-in">
+                            <div className="bg-white dark:bg-[#1a1b26] p-4 rounded-2xl shadow-xl w-64 space-y-3 border border-slate-200 dark:border-white/10 animate-in zoom-in-95">
+                               <div className="text-center">
+                                  <div className="w-12 h-12 bg-brand-500 text-white rounded-full flex items-center justify-center text-xl font-bold mx-auto mb-2">
+                                     {selectedGlobalUser.name[0].toUpperCase()}
+                                  </div>
+                                  <h3 className="font-bold text-slate-900 dark:text-white">{selectedGlobalUser.name}</h3>
+                               </div>
+                               
+                               {!isFriend(selectedGlobalUser.id) ? (
+                                 <Button fullWidth onClick={() => handleFriendRequest(selectedGlobalUser.id)}>
+                                    <UserPlus size={16} /> Add Friend
+                                 </Button>
+                               ) : (
+                                  <div className="text-center text-xs text-emerald-500 font-bold py-2 flex items-center justify-center gap-1">
+                                     <Check size={14} /> Already Friends
+                                  </div>
+                               )}
+                               
+                               <Button variant="secondary" fullWidth onClick={() => setSelectedGlobalUser(null)}>
+                                  Close
+                               </Button>
+                            </div>
+                         </div>
+                      )}
                     </div>
                   )}
 
@@ -546,6 +651,13 @@ export const SocialHub: React.FC<SocialHubProps> = ({
           </div>
         </div>
       )}
+    </>
+  );
+
+  return (
+    <>
+      {triggerTarget ? createPortal(TriggerButton, triggerTarget) : TriggerButton}
+      {createPortal(DrawerOverlay, document.body)}
     </>
   );
 };
