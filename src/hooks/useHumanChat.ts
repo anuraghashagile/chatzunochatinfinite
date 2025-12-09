@@ -152,8 +152,11 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     
     // 1. MESSAGES
     if (data.type === 'message') {
+      // Use the sender's ID if provided, otherwise generate one (fallback)
+      const msgId = data.id || (Date.now().toString() + Math.random().toString());
+      
       const newMessage: Message = {
-        id: Date.now().toString() + Math.random().toString(),
+        id: msgId,
         sender: 'stranger',
         timestamp: Date.now(),
         type: data.dataType || 'text',
@@ -169,15 +172,28 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
         setMessages(prev => [...prev, newMessage]);
+        
+        // Send Seen Receipt immediately for main chat
+        conn.send({ type: 'seen', messageId: msgId });
       } else {
         // Direct Chat Logic (Social Hub)
         setIncomingDirectMessage({
           peerId: conn.peer,
           message: newMessage
         });
+        // We don't auto-send seen here as user might not have opened the drawer. 
+        // Logic for direct chat seen status can be expanded later.
       }
 
-    // 2. REACTIONS
+    // 2. SEEN RECEIPTS
+    } else if (data.type === 'seen') {
+      if (isMain && data.messageId) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === data.messageId ? { ...msg, status: 'seen' } : msg
+        ));
+      }
+
+    // 3. REACTIONS
     } else if (data.type === 'reaction') {
        if (data.messageId) {
          setIncomingReaction({ messageId: data.messageId, emoji: data.payload, sender: 'stranger' });
@@ -185,6 +201,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
          if (isMain) {
             setMessages(prev => prev.map(msg => {
                if (msg.id === data.messageId) {
+                 // Check duplicates
+                 if (msg.reactions?.some(r => r.sender === 'stranger' && r.emoji === data.payload)) return msg;
                  return { ...msg, reactions: [...(msg.reactions || []), { emoji: data.payload, sender: 'stranger' as const }] };
                }
                return msg;
@@ -192,7 +210,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
          }
        }
 
-    // 3. EDIT MESSAGE
+    // 4. EDIT MESSAGE
     } else if (data.type === 'edit_message') {
        if (isMain) {
          setMessages(prev => prev.map(msg => {
@@ -203,7 +221,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
          }));
        }
 
-    // 4. INDICATORS (Main Only)
+    // 5. INDICATORS (Main Only)
     } else if (data.type === 'typing' && isMain) {
       setPartnerTyping(data.payload);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -214,7 +232,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
       if (data.payload) recordingTimeoutRef.current = setTimeout(() => setPartnerRecording(false), 4000);
 
-    // 5. PROFILE
+    // 6. PROFILE
     } else if (data.type === 'profile') {
       if (isMain) {
         setPartnerProfile(data.payload);
@@ -227,18 +245,18 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         saveToRecent(data.payload, conn.peer);
       }
 
-    // 6. VANISH MODE
+    // 7. VANISH MODE
     } else if (data.type === 'vanish_mode' && isMain) {
       setRemoteVanishMode(data.payload);
 
-    // 7. FRIEND REQUESTS
+    // 8. FRIEND REQUESTS
     } else if (data.type === 'friend_request') {
       setIncomingFriendRequest({ profile: data.payload, peerId: conn.peer });
 
     } else if (data.type === 'friend_accept') {
       saveFriend(data.payload, conn.peer);
 
-    // 8. DISCONNECT
+    // 9. DISCONNECT
     } else if (data.type === 'disconnect') {
       if (isMain) {
         setStatus(ChatMode.DISCONNECTED);
@@ -437,47 +455,53 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
   // --- SEND MESSAGES (MAIN) ---
   const sendMessage = useCallback((text: string) => {
+    const id = Date.now().toString() + Math.random().toString(36).substring(2);
     if (mainConnRef.current && status === ChatMode.CONNECTED) {
-      const payload: PeerData = { type: 'message', payload: text, dataType: 'text' };
+      const payload: PeerData = { type: 'message', payload: text, dataType: 'text', id };
       mainConnRef.current.send(payload);
     }
     setMessages(prev => [...prev, {
-      id: Date.now().toString(),
+      id,
       text,
       type: 'text',
       sender: 'me',
       timestamp: Date.now(),
-      reactions: []
+      reactions: [],
+      status: 'sent'
     }]);
   }, [status]);
 
   const sendImage = useCallback((base64Image: string) => {
+    const id = Date.now().toString() + Math.random().toString(36).substring(2);
     if (mainConnRef.current && status === ChatMode.CONNECTED) {
-      const payload: PeerData = { type: 'message', payload: base64Image, dataType: 'image' };
+      const payload: PeerData = { type: 'message', payload: base64Image, dataType: 'image', id };
       mainConnRef.current.send(payload);
     }
     setMessages(prev => [...prev, {
-      id: Date.now().toString(),
+      id,
       fileData: base64Image,
       type: 'image',
       sender: 'me',
       timestamp: Date.now(),
-      reactions: []
+      reactions: [],
+      status: 'sent'
     }]);
   }, [status]);
 
   const sendAudio = useCallback((base64Audio: string) => {
+    const id = Date.now().toString() + Math.random().toString(36).substring(2);
     if (mainConnRef.current && status === ChatMode.CONNECTED) {
-      const payload: PeerData = { type: 'message', payload: base64Audio, dataType: 'audio' };
+      const payload: PeerData = { type: 'message', payload: base64Audio, dataType: 'audio', id };
       mainConnRef.current.send(payload);
     }
     setMessages(prev => [...prev, {
-      id: Date.now().toString(),
+      id,
       fileData: base64Audio,
       type: 'audio',
       sender: 'me',
       timestamp: Date.now(),
-      reactions: []
+      reactions: [],
+      status: 'sent'
     }]);
   }, [status]);
 
@@ -506,7 +530,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   }, [status]);
 
   // --- SEND DIRECT MESSAGE (SOCIAL HUB) ---
-  const sendDirectMessage = useCallback((targetPeerId: string, text: string) => {
+  const sendDirectMessage = useCallback((targetPeerId: string, text: string, id?: string) => {
     let conn = directConnsRef.current.get(targetPeerId);
 
     if (!conn && peerRef.current) {
@@ -524,7 +548,12 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     }
 
     if (conn) {
-      const payload: PeerData = { type: 'message', payload: text, dataType: 'text' };
+      const payload: PeerData = { 
+        type: 'message', 
+        payload: text, 
+        dataType: 'text',
+        id: id || Date.now().toString() // Use provided ID or generate one
+      };
       // Even if connection is not 'open' yet, peerjs buffers it
       conn.send(payload);
     }

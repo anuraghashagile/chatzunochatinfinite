@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Message } from '../types';
 import { clsx } from 'clsx';
-import { Smile, Pencil } from 'lucide-react';
+import { Smile, Pencil, Check, CheckCheck } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -208,8 +208,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
            </div>
         )}
         
-        <div className="text-[10px] text-slate-300 dark:text-slate-600 mt-1 px-1">
+        <div className="text-[10px] text-slate-300 dark:text-slate-600 mt-1 px-1 flex items-center gap-1 justify-end">
             {formatTime(message.timestamp)}
+            {isMe && (
+              <>
+                 {message.status === 'seen' && <CheckCheck size={14} className="text-red-500" strokeWidth={2} />}
+                 {message.status !== 'seen' && <Check size={14} className="text-slate-400 dark:text-slate-500" strokeWidth={2} />}
+              </>
+            )}
         </div>
       </div>
     </div>

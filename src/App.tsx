@@ -27,8 +27,22 @@ const getStoredUserId = () => {
   return id;
 };
 
+// Theme initialization with system preference support
+const getInitialTheme = (): 'light' | 'dark' => {
+  if (typeof window !== 'undefined') {
+    // 1. Check Local Storage
+    const saved = localStorage.getItem('chat_theme') as 'light' | 'dark';
+    if (saved) return saved;
+    // 2. Check System Preference
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
+  }
+  // 3. Default
+  return 'dark';
+};
+
 export default function App() {
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
@@ -177,7 +191,13 @@ export default function App() {
     }
   }, [theme]);
 
-  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  const toggleTheme = () => {
+    setTheme(prev => {
+      const newTheme = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('chat_theme', newTheme);
+      return newTheme;
+    });
+  };
 
   // Auto-scroll for Main Chat
   useEffect(() => {
@@ -318,7 +338,14 @@ export default function App() {
   const renderMainContent = () => {
     // 1. Landing Page (Only if IDLE and no profile)
     if (status === ChatMode.IDLE && !userProfile) {
-      return <LandingPage onlineCount={onlineUsers.length} onStart={handleStartClick} />;
+      return (
+        <LandingPage 
+          onlineCount={onlineUsers.length} 
+          onStart={handleStartClick} 
+          theme={theme}
+          toggleTheme={toggleTheme}
+        />
+      );
     }
 
     // 2. Waiting / Connecting Screen (Random Mode)

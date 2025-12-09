@@ -13,7 +13,7 @@ interface SocialHubProps {
   myPeerId?: string | null;
   privateMessages: Message[]; // Main chat messages
   sendPrivateMessage: (text: string) => void; // Main chat send
-  sendDirectMessage?: (peerId: string, text: string) => void; // Direct chat send
+  sendDirectMessage?: (peerId: string, text: string, id?: string) => void; // Direct chat send updated signature
   sendReaction?: (messageId: string, emoji: string) => void;
   currentPartner: UserProfile | null;
   chatStatus: ChatMode;
@@ -183,14 +183,16 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   const handlePrivateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (privateInput.trim() && activePeer) {
-      // 1. Create Optimistic Message
+      // 1. Create Optimistic Message with unique ID
+      const newMsgId = Date.now().toString() + Math.random().toString(36).substring(2);
       const newMsg: Message = {
-        id: Date.now().toString(),
+        id: newMsgId,
         text: privateInput,
         sender: 'me',
         timestamp: Date.now(),
         type: 'text',
-        reactions: []
+        reactions: [],
+        status: 'sent'
       };
 
       // 2. Update Local State & Storage immediately
@@ -200,7 +202,7 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
       // 3. Send over Network (Directly to peer)
       if (sendDirectMessage) {
-        sendDirectMessage(activePeer.id, privateInput);
+        sendDirectMessage(activePeer.id, privateInput, newMsgId);
       } else {
         // Fallback (Legacy behaviour if hook not updated)
         sendPrivateMessage(privateInput);

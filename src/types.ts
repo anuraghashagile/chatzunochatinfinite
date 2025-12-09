@@ -37,13 +37,15 @@ export interface Message {
   isVanish?: boolean;
   reactions?: Reaction[]; // Added for reactions
   isEdited?: boolean; // Added for edit status
+  status?: 'sent' | 'seen'; // Added for read receipts
 }
 
 export interface PeerData {
-  type: 'message' | 'typing' | 'recording' | 'disconnect' | 'profile' | 'profile_update' | 'vanish_mode' | 'reaction' | 'edit_message' | 'friend_request' | 'friend_accept';
+  type: 'message' | 'typing' | 'recording' | 'disconnect' | 'profile' | 'profile_update' | 'vanish_mode' | 'reaction' | 'edit_message' | 'friend_request' | 'friend_accept' | 'seen';
   payload?: any;
   dataType?: MessageType;
-  messageId?: string; // For targeting specific messages (reactions/edits)
+  messageId?: string; // For targeting specific messages (reactions/edits/seen)
+  id?: string; // For syncing message IDs across peers
 }
 
 // Presence state for the lobby
