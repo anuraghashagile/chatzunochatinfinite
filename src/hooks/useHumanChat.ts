@@ -1,4 +1,5 @@
 
+
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { supabase } from '../lib/supabase';
@@ -46,6 +47,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const myPeerIdRef = useRef<string | null>(null);
   const isMatchmakerRef = useRef(false);
+  const isConnectingRef = useRef(false);
   const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,7 +123,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   // --- CLEANUP ---
   const cleanupMain = useCallback(() => {
     if (channelRef.current) {
-      channelRef.current.untrack(); 
       supabase.removeChannel(channelRef.current);
       channelRef.current = null;
     }
@@ -139,6 +140,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
     // We do NOT destroy peerRef here, as direct chats might rely on it.
     
     isMatchmakerRef.current = false;
+    isConnectingRef.current = false;
     setPartnerTyping(false);
     setPartnerRecording(false);
     setStatus(ChatMode.DISCONNECTED);
@@ -282,6 +284,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
        mainConnRef.current = conn;
        // Stop being matchmaker since we are connected/connecting
        isMatchmakerRef.current = false;
+       isConnectingRef.current = false;
        
        if (channelRef.current && myPeerIdRef.current) {
           channelRef.current.track({
@@ -324,6 +327,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
          // If error happens during initial connection, reset matchmaker status
          if (status === ChatMode.SEARCHING || status === ChatMode.WAITING) {
            isMatchmakerRef.current = false;
+           isConnectingRef.current = false;
          }
       }
     });
@@ -365,6 +369,9 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
 
   // --- CONNECT (RANDOM) ---
   const connect = useCallback(() => {
+    if (isConnectingRef.current) return;
+    isConnectingRef.current = true;
+    
     cleanupMain();
     setMessages([]);
     setPartnerProfile(null);
@@ -385,6 +392,8 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
   const joinLobby = useCallback((myId: string) => {
     setStatus(ChatMode.SEARCHING);
     setError(null);
+    // Explicitly reset matchmaker status on new join
+    isMatchmakerRef.current = false;
     
     const channel = supabase.channel(MATCHMAKING_CHANNEL, {
       config: { presence: { key: myId } }
@@ -398,7 +407,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
         setOnlineUsers(allUsers);
 
         // Don't match if already connected or acting as matchmaker
-        if (isMatchmakerRef.current || mainConnRef.current?.open) return;
+        if (isMatchmakerRef.current || (mainConnRef.current && mainConnRef.current.open)) return;
 
         // Find available users (excluding self)
         const sortedWaiters = allUsers
@@ -428,7 +437,6 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
                    console.warn("Connection timed out. Resetting matchmaker.");
                    isMatchmakerRef.current = false;
                    mainConnRef.current = null;
-                   // Trigger a presence update to retry matching (optional/implicit)
                  }
                }, 5000);
              } else {
@@ -449,6 +457,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
             profile: userProfile
           });
           setStatus(ChatMode.WAITING);
+          isConnectingRef.current = false; // Initial connection request handled
         }
       });
   }, [setupConnection, userProfile]);
@@ -680,6 +689,7 @@ export const useHumanChat = (userProfile: UserProfile | null) => {
       directConnsRef.current.forEach(c => c.close());
       directConnsRef.current.clear();
       peerRef.current?.destroy();
+      peerRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

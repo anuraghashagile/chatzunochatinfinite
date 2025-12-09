@@ -81,13 +81,21 @@ export const SocialHub: React.FC<SocialHubProps> = ({
 
   // Update trigger target when status changes (input bar mounts/unmounts)
   useEffect(() => {
-    // Small timeout to allow DOM to update
-    const timer = setTimeout(() => {
+    // Check repeatedly for a short duration because DOM updates can be slightly async
+    const checkAnchor = () => {
       const el = document.getElementById('social-hub-trigger-anchor');
       setTriggerTarget(el);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [chatStatus]);
+    };
+    
+    checkAnchor();
+    const timer = setInterval(checkAnchor, 100);
+    const timeout = setTimeout(() => clearInterval(timer), 1000); // Stop checking after 1s
+    
+    return () => {
+       clearInterval(timer);
+       clearTimeout(timeout);
+    };
+  }, [chatStatus, myProfile]); // Re-check if profile loads or status changes
 
   // Sync friends prop
   useEffect(() => {
@@ -280,7 +288,6 @@ export const SocialHub: React.FC<SocialHubProps> = ({
   const handleFriendRequest = (peerId: string) => {
      if (sendDirectFriendRequest) {
         sendDirectFriendRequest(peerId);
-        // Maybe show toast or success state locally
         alert("Friend request sent!");
         setSelectedGlobalUser(null);
      }
@@ -298,9 +305,10 @@ export const SocialHub: React.FC<SocialHubProps> = ({
     <button 
       onClick={() => setIsOpen(true)}
       className={clsx(
-        "z-[60] w-12 h-12 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-2xl shadow-brand-500/40 transition-transform hover:scale-105 active:scale-95 flex items-center justify-center border-2 border-slate-50 dark:border-slate-900 relative",
-        // If anchored, we don't need fixed positioning. If not anchored, we fallback to fixed bottom-right.
-        !triggerTarget && "fixed bottom-24 right-5 sm:bottom-10 sm:right-10 w-14 h-14" 
+        "z-[60] w-12 h-12 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-2xl shadow-brand-500/40 transition-transform hover:scale-105 active:scale-95 flex items-center justify-center border-2 border-slate-50 dark:border-slate-900",
+        // Position relies on being inside a relatively positioned parent or fixed fallback
+        !triggerTarget && "fixed bottom-24 right-5 sm:bottom-10 sm:right-10 w-14 h-14",
+        triggerTarget && "absolute -top-14 right-0 pointer-events-auto" // Adjusted for anchor
       )}
       aria-label="Open Social Hub"
     >

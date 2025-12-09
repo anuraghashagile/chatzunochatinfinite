@@ -64,6 +64,10 @@ export default function App() {
   // Edit State
   const [editingMessage, setEditingMessage] = useState<{id: string, text: string} | null>(null);
   
+  // Friend Notification State
+  const [onlineFriends, setOnlineFriends] = useState<string[]>([]);
+  const [friendNotification, setFriendNotification] = useState<string | null>(null);
+
   const [isRecording, setIsRecording] = useState(false);
   const userId = useRef(getStoredUserId()).current;
   
@@ -155,6 +159,30 @@ export default function App() {
     }
   }, [remoteVanishMode]);
 
+  // --- FRIEND NOTIFICATIONS ---
+  useEffect(() => {
+    if (friends.length > 0) {
+      const currentOnlineFriends = onlineUsers
+        .filter(u => friends.some(f => f.id === u.peerId))
+        .map(u => u.peerId);
+
+      // Check for newly online friends
+      const newOnline = currentOnlineFriends.find(id => !onlineFriends.includes(id));
+      
+      if (newOnline) {
+        const friend = friends.find(f => f.id === newOnline);
+        if (friend) {
+          setFriendNotification(`${friend.profile.username} is now online!`);
+          setTimeout(() => setFriendNotification(null), 4000);
+          playSound();
+        }
+      }
+      
+      setOnlineFriends(currentOnlineFriends);
+    }
+  }, [onlineUsers, friends, onlineFriends]);
+
+
   // --- AUTO-DELETE MESSAGES ---
   useEffect(() => {
     const interval = setInterval(() => {
@@ -207,7 +235,7 @@ export default function App() {
     if (sessionType === 'random') {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, partnerTyping, sessionType]);
+  }, [messages, partnerTyping, sessionType, status]);
 
   const handleStartClick = () => setShowJoinModal(true);
 
@@ -273,7 +301,7 @@ export default function App() {
   const handleNewChat = () => {
     setSessionType('random'); 
     disconnect(); // Disconnects main chat only
-    setTimeout(connect, 200);
+    setTimeout(connect, 300); // Slight delay to ensure PeerJS handles cleanup
   };
 
   const initiateEdit = (id: string, text: string) => {
@@ -338,46 +366,34 @@ export default function App() {
   };
 
   // --- VIEW RENDERING LOGIC ---
-  const renderMainContent = () => {
-    // 1. Landing Page (Only if IDLE and no profile)
-    if (status === ChatMode.IDLE && !userProfile) {
-      return (
-        <LandingPage 
-          onlineCount={onlineUsers.length} 
-          onStart={handleStartClick} 
-          theme={theme}
-          toggleTheme={toggleTheme}
-        />
-      );
-    }
-
-    // 2. Waiting / Connecting Screen (Random Mode)
-    // Only show this if we are actively searching in Main Mode
-    if (status === ChatMode.SEARCHING || status === ChatMode.WAITING) {
-      return (
-        <div className="h-full flex flex-col items-center justify-center p-6 text-center">
-          <div className="relative mb-8">
-            <Loader />
-          </div>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-3">Matching you...</h2>
-          <p className="text-slate-500 dark:text-slate-400 max-w-xs mx-auto animate-pulse mb-8">
-             Finding a stranger with similar vibes...
-          </p>
-          <div className="flex flex-wrap justify-center gap-2 max-w-sm mx-auto mb-12">
-             {userProfile?.interests.map(i => (
-                <span key={i} className="px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-full text-xs font-medium">{i}</span>
-             ))}
-          </div>
-          <Button variant="secondary" onClick={() => { disconnect(); }}>Cancel</Button>
-        </div>
-      );
-    }
-
-    // 3. Active Chat Screen (Random Mode) - Or Empty Idle State
+  const renderChatInterface = () => {
+    const isSearching = status === ChatMode.SEARCHING || status === ChatMode.WAITING;
+    const isDisconnected = status === ChatMode.DISCONNECTED || status === ChatMode.IDLE;
+    
     return (
       <div className="flex-1 flex flex-col h-full relative">
          {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2 w-full max-w-4xl mx-auto z-10 relative scroll-smooth">
+          
+          {/* SEARCHING OVERLAY */}
+          {isSearching && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-300">
+               <div className="relative mb-8">
+                 <Loader />
+               </div>
+               <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-3">Matching you...</h2>
+               <p className="text-slate-500 dark:text-slate-400 max-w-xs mx-auto animate-pulse mb-8 text-center">
+                  Finding a stranger with similar vibes...
+               </p>
+               <div className="flex flex-wrap justify-center gap-2 max-w-sm mx-auto mb-12">
+                  {userProfile?.interests.map(i => (
+                     <span key={i} className="px-3 py-1 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-full text-xs font-medium shadow-sm">{i}</span>
+                  ))}
+               </div>
+               <Button variant="secondary" onClick={() => { disconnect(); }}>Cancel</Button>
+            </div>
+          )}
+
           {!partnerProfile && status === ChatMode.CONNECTED && (
               <div className="text-center text-xs text-slate-400 my-4">Connected encrypted connection...</div>
           )}
@@ -394,7 +410,7 @@ export default function App() {
               </div>
           ))}
 
-          {(status === ChatMode.DISCONNECTED || status === ChatMode.IDLE) && (
+          {isDisconnected && !isSearching && (
               <div className="py-8 flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 mt-8 border-t border-slate-100 dark:border-white/5 pt-8">
                 <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-400"><Shield size={32} /></div>
                 <div className="text-center space-y-1">
@@ -407,11 +423,11 @@ export default function App() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
+        {/* Input Area - PERSISTENT */}
         <div className={clsx(
           "border-t shrink-0 w-full z-20 pb-[env(safe-area-inset-bottom)] transition-colors",
           settings.vanishMode ? "bg-[#1a0b2e] dark:bg-[#1a0b2e] border-purple-500/30" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-white/5",
-          status !== ChatMode.CONNECTED && "opacity-50 pointer-events-none grayscale"
+          (isDisconnected || isSearching) && "grayscale opacity-80"
         )}>
           <div className="max-w-4xl mx-auto p-2 sm:p-4">
             {partnerTyping && (
@@ -422,10 +438,11 @@ export default function App() {
 
             <form onSubmit={handleSendMessage} className="flex gap-2 items-end relative">
               {/* --- ANCHOR FOR SOCIAL HUB BUTTON --- */}
-              <div id="social-hub-trigger-anchor" className="absolute bottom-[calc(100%+8px)] right-0 z-30"></div>
+              {/* Positioned absolutely relative to the form container to ensure it stays fixed on top-right of input */}
+              <div id="social-hub-trigger-anchor" className="absolute bottom-[calc(100%+16px)] right-0 z-30 pointer-events-none w-0 h-0"></div>
               
               <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} disabled={status !== ChatMode.CONNECTED}/>
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-3 text-slate-400 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50 shrink-0"><ImageIcon size={24} /></button>
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-3 text-slate-400 hover:text-brand-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50 shrink-0" disabled={status !== ChatMode.CONNECTED}><ImageIcon size={24} /></button>
               {!inputText.trim() && (
                   isRecording ? (
                     <button type="button" onClick={stopRecording} className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-lg shadow-red-500/20 transition-all animate-pulse shrink-0"><Square size={24} fill="currentColor" /></button>
@@ -442,11 +459,12 @@ export default function App() {
                   placeholder={status === ChatMode.CONNECTED ? (settings.vanishMode ? "Vanish message..." : "Type a message...") : "Disconnected"}
                   className="w-full bg-transparent border-0 px-4 py-3 placeholder:text-slate-400 focus:outline-none text-slate-900 dark:text-white"
                   autoComplete="off"
+                  disabled={status !== ChatMode.CONNECTED}
                 />
               </div>
 
               {inputText.trim() && (
-                <button type="submit" className="p-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl shadow-lg shadow-brand-500/20 transition-all active:scale-95 shrink-0"><Send size={24} /></button>
+                <button type="submit" className="p-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl shadow-lg shadow-brand-500/20 transition-all active:scale-95 shrink-0" disabled={status !== ChatMode.CONNECTED}><Send size={24} /></button>
               )}
             </form>
           </div>
@@ -514,9 +532,19 @@ export default function App() {
         </div>
       )}
 
+      {/* Online Friend Notification */}
+      {friendNotification && (
+         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[60] animate-in slide-in-from-top-5 fade-in duration-300 pointer-events-none">
+            <div className="bg-emerald-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
+               <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+               {friendNotification}
+            </div>
+         </div>
+      )}
+
       {/* Error Toast */}
       {error && sessionType === 'random' && (
-         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-5">
+         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] animate-in slide-in-from-top-5">
             <div className="bg-red-500 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm font-medium">
               <AlertTriangle size={16} /> {error}
             </div>
@@ -534,7 +562,16 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      {renderMainContent()}
+      {status === ChatMode.IDLE && !userProfile ? (
+         <LandingPage 
+          onlineCount={onlineUsers.length} 
+          onStart={handleStartClick} 
+          theme={theme}
+          toggleTheme={toggleTheme}
+        />
+      ) : (
+        renderChatInterface()
+      )}
 
       {/* Modals & Overlays */}
       <SettingsModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} settings={settings} onUpdateSettings={handleUpdateSettings}/>

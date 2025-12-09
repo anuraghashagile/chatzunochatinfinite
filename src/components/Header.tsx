@@ -1,7 +1,5 @@
-
-
 import React, { useState } from 'react';
-import { Infinity, Moon, Sun, Settings, ArrowLeft, Edit2, AlertTriangle, UserPlus } from 'lucide-react';
+import { Moon, Sun, Settings, ArrowLeft, Edit2, AlertTriangle, UserPlus } from 'lucide-react';
 import { ChatMode, UserProfile } from '../types';
 
 interface HeaderProps {
@@ -77,8 +75,12 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             // Default Header
             <div className="flex items-center gap-3">
-              <div className="text-slate-900 dark:text-white shrink-0 hidden sm:block">
-                <Infinity className="w-8 h-8" strokeWidth={2.5} />
+              <div className="shrink-0 hidden sm:block">
+                <img 
+                  src="https://i.ibb.co/68038vj/73229-1.png" 
+                  alt="Chatzuno Logo" 
+                  className="w-10 h-10 object-contain drop-shadow-sm"
+                />
               </div>
               <div>
                 <h1 className="font-bold text-lg leading-tight text-slate-900 dark:text-white tracking-tight">Chatzuno</h1>
